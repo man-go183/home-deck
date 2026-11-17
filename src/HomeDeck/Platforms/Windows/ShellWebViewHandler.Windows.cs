@@ -1,4 +1,5 @@
 using HomeDeck.Controls;
+using System.Runtime.InteropServices.WindowsRuntime;
 using HomeDeck;
 using HomeDeck.Services;
 using Microsoft.Extensions.DependencyInjection;
@@ -44,7 +45,7 @@ public partial class ShellWebViewHandler
                         var env = (s as Microsoft.Web.WebView2.Core.CoreWebView2)?.Environment;
                         if (env != null)
                             e.Response = env.CreateWebResourceResponse(
-                                new MemoryStream(Array.Empty<byte>()), 403, "Blocked", "Content-Type: text/plain");
+                                new MemoryStream(Array.Empty<byte>()).AsRandomAccessStream(), 403, "Blocked", "Content-Type: text/plain");
                     }
                 }
                 catch { /* fail open */ }
