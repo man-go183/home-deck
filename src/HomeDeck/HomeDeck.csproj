@@ -20,6 +20,7 @@
 
   <ItemGroup>
     <PackageReference Include="Plugin.LocalNotification" Version="11.1.0" />
+    <PackageReference Include="Microsoft.Maui.Controls" Version="10.0.110" />
   </ItemGroup>
 
   <!-- v1 ships no custom icon/splash assets on purpose (see README).
