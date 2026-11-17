@@ -27,7 +27,7 @@ public partial class LauncherPage : ContentPage
     {
         base.OnAppearing();
         await _store.LoadAsync();
-        AskChk.Checked = _store.Prefs.AskEveryTime;
+        AskChk.IsChecked = _store.Prefs.AskEveryTime;
         BuildCards();
 
         // Reopen last profile when "ask" is off.
@@ -168,7 +168,7 @@ public partial class LauncherPage : ContentPage
 
     async Task EditProfile(Profile p, View card, View shieldDot)
     {
-        var choice = await DisplayActionSheet(p.Name, "Cancel", "Delete",
+        var choice = await DisplayActionSheetAsync(p.Name, "Cancel", "Delete",
             "Rename", "Edit link", p.AdBlock ? "Turn ad-blocking off" : "Turn ad-blocking on");
         if (choice == "Rename")
         {
@@ -192,7 +192,7 @@ public partial class LauncherPage : ContentPage
         }
         else if (choice == "Delete")
         {
-            if (await DisplayAlert("Delete?", $"Remove profile \"{p.Name}\"?", "Delete", "Cancel"))
+            if (await DisplayAlertAsync("Delete?", $"Remove profile \"{p.Name}\"?", "Delete", "Cancel"))
             {
                 _store.Remove(p);
                 BuildCards();
@@ -200,11 +200,11 @@ public partial class LauncherPage : ContentPage
         }
     }
 
-    void OnAskTap(object? sender, TappedEventArgs e) => AskChk.Checked = !AskChk.Checked;
+    void OnAskTap(object? sender, TappedEventArgs e) => AskChk.IsChecked = !AskChk.IsChecked;
 
     async void OnHelp(object? sender, EventArgs e)
     {
-        await DisplayAlert("Using Home Deck",
+        await DisplayAlertAsync("Using Home Deck",
             "1. Choose a profile to open its page.\n" +
             "2. Tap Edit on a card to rename / edit / delete it.\n" +
             "3. + adds a profile (ad-blocking on by default).\n" +
