@@ -195,7 +195,7 @@ public sealed class AdBlockService
             }
             if (AnchorStart)
             {
-                var rx = "^" + Regex.Escape(pat).Replace(@"\*", ".*");
+                var rx = "^" + System.Text.RegularExpressions.Regex.Escape(pat).Replace(@"\*", ".*");
                 return System.Text.RegularExpressions.Regex.IsMatch(urlL, rx);
             }
             if (pat.Contains("*"))
