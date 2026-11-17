@@ -27,7 +27,7 @@ public partial class BrowserPage : ContentPage
         {
             try
             {
-                await Splash.FadeTo(0, 200);
+                await Splash.FadeToAsync(0, 200);
                 Splash.IsVisible = false;
                 Splash.Opacity = 1;
             }
@@ -127,7 +127,7 @@ public partial class BrowserPage : ContentPage
 
     async void OnMenu(object? sender, EventArgs e)
     {
-        var choice = await DisplayActionSheet("Home Deck", "Cancel", null,
+        var choice = await DisplayActionSheetAsync("Home Deck", "Cancel", null,
             "Switch profile", "Open in browser", "Manage profiles");
         if (choice == "Switch profile") { RebuildDrop(); Drop.IsVisible = true; }
         else if (choice == "Open in browser" && _profile != null)
