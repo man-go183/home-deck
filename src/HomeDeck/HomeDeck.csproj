@@ -23,6 +23,12 @@
     <PackageReference Include="Microsoft.Maui.Controls" Version="10.0.110" />
   </ItemGroup>
 
+  <ItemGroup Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'windows'">
+    <ApplicationDefinition Include="Platforms\Windows\App.xaml" />
+    <AppxManifest Include="Platforms\Windows\Package.appxmanifest" />
+    <MauiXaml Remove="Platforms\Windows\App.xaml" />
+  </ItemGroup>
+
   <!-- v1 ships no custom icon/splash assets on purpose (see README).
        Add later with:
          <MauiIcon Include="Resources\AppIcon\appicon.svg" />
