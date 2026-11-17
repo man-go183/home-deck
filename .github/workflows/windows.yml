@@ -1,0 +1,36 @@
+name: windows-exe
+
+# Manual only: run from the Actions tab when the code is ready.
+# Nothing builds on push/upload.
+on:
+  workflow_dispatch:
+
+jobs:
+  exe:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Install MAUI workload
+        run: dotnet workload install maui-windows
+
+      - name: Publish unpackaged exe
+        run: dotnet publish src/HomeDeck/HomeDeck.csproj -f net8.0-windows10.0.19041.0 -c Release -p:WindowsPackageType=None
+
+      - name: Zip output
+        shell: pwsh
+        run: |
+          $pub = Get-ChildItem src/HomeDeck/bin/Release/net8.0-windows10.0.19041.0 -Recurse -Directory -Filter "publish" | Select-Object -First 1
+          if (-not $pub) { throw "publish folder not found" }
+          Compress-Archive -Path "$($pub.FullName)/*" -DestinationPath out-homedeck-windows.zip
+
+      - name: Upload exe zip
+        uses: actions/upload-artifact@v4
+        with:
+          name: homedeck-windows
+          path: out-homedeck-windows.zip
