@@ -26,6 +26,7 @@
   <ItemGroup Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'windows'">
     <ApplicationDefinition Include="Platforms\Windows\App.xaml" />
     <AppxManifest Include="Platforms\Windows\Package.appxmanifest" />
+    <Content Include="Platforms\Windows\Assets\*.png" />
     <MauiXaml Remove="Platforms\Windows\App.xaml" />
   </ItemGroup>
 
