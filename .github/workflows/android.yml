@@ -23,7 +23,7 @@ jobs:
           distribution: temurin
           java-version: "17"
 
-      - name: Set up .NET 8
+      - name: Set up .NET 10
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: 10.0.x
@@ -37,7 +37,7 @@ jobs:
       - name: Collect APK
         run: |
           mkdir -p out
-          find src/HomeDeck/bin/${{ inputs.configuration }}/net8.0-android -name '*.apk' -exec cp {} out/ \;
+          find src/HomeDeck/bin/${{ inputs.configuration }}/net10.0-android -name '*.apk' -exec cp {} out/ \;
           ls -la out
 
       - name: Upload APK
