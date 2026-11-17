@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             xmlns:ctrl="clr-namespace:HomeDeck.Controls"
+             x:Class="HomeDeck.Views.BrowserPage"
+             Title="Home Deck"
+             BackgroundColor="{StaticResource HdBg}">
+  <Grid RowDefinitions="Auto,*">
+    <!-- shell bar -->
+    <Grid Grid.Row="0" ColumnDefinitions="Auto,*,Auto" Padding="8,6"
+          BackgroundColor="#241F1A">
+      <Button x:Name="BackBtn" Text="‹" FontSize="20" WidthRequest="40"
+              TextColor="{StaticResource HdText}" BackgroundColor="Transparent"
+              Clicked="OnBack" />
+      <HorizontalStackLayout x:Name="Pill" Grid.Column="1" Spacing="8"
+                             VerticalOptions="Center" HorizontalOptions="Center">
+        <Grid WidthRequest="26" HeightRequest="26" VerticalOptions="Center">
+          <Ellipse x:Name="PillAva" Fill="#B3402E" />
+          <Label x:Name="PillGlyph" FontSize="12" FontAttributes="Bold"
+                 TextColor="White" HorizontalOptions="Center"
+                 VerticalOptions="Center" />
+          <Ellipse x:Name="PillShield" WidthRequest="11" HeightRequest="11"
+                   Fill="{StaticResource HdGold}"
+                   HorizontalOptions="End" VerticalOptions="End" />
+        </Grid>
+        <Label x:Name="PillName" FontSize="14" FontAttributes="Bold"
+               TextColor="{StaticResource HdText}" VerticalOptions="Center" />
+        <Label Text="– Home Deck" FontSize="12"
+               TextColor="{StaticResource HdDim}" VerticalOptions="Center" />
+        <Label.GestureRecognizers>
+          <TapGestureRecognizer Tapped="OnPillTap" />
+        </Label.GestureRecognizers>
+      </HorizontalStackLayout>
+      <Button Grid.Column="2" Text="☰" FontSize="16" WidthRequest="40"
+              TextColor="{StaticResource HdText}" BackgroundColor="Transparent"
+              Clicked="OnMenu" />
+    </Grid>
+
+    <Grid Grid.Row="1">
+      <ctrl:ShellWebView x:Name="Web" />
+      <!-- launch splash -->
+      <Grid x:Name="Splash" BackgroundColor="{StaticResource HdBg}"
+            VerticalOptions="FillAndExpand" HorizontalOptions="FillAndExpand">
+        <VerticalStackLayout VerticalOptions="Center" Spacing="12">
+          <Grid WidthRequest="76" HeightRequest="76" HorizontalOptions="Center">
+            <Ellipse x:Name="SplashAva" Fill="#B3402E" />
+            <Label x:Name="SplashGlyph" FontSize="30" FontAttributes="Bold"
+                   TextColor="White" HorizontalOptions="Center"
+                   VerticalOptions="Center" />
+          </Grid>
+          <Label x:Name="SplashName" FontSize="17" FontAttributes="Bold"
+                 TextColor="{StaticResource HdText}"
+                 HorizontalOptions="Center" />
+        </VerticalStackLayout>
+      </Grid>
+      <!-- profile switcher dropdown -->
+      <Border x:Name="Drop" IsVisible="false" StrokeShape="RoundRectangle 14"
+              BackgroundColor="#1E1A16" Stroke="#3A342D"
+              HorizontalOptions="Center" VerticalOptions="Start"
+              Margin="0,8,0,0" Padding="6" MinimumWidthRequest="220">
+        <VerticalStackLayout x:Name="DropList" Spacing="2" />
+      </Border>
+    </Grid>
+  </Grid>
+</ContentPage>
