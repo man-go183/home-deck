@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             x:Class="HomeDeck.Views.LauncherPage"
+             Title="Home Deck"
+             BackgroundColor="{StaticResource HdBg}">
+  <ScrollView>
+    <VerticalStackLayout Padding="24,48,24,24" Spacing="10"
+                         VerticalOptions="CenterAndExpand">
+      <Label Text="HOME DECK" FontSize="11" TextColor="{StaticResource HdDim}"
+             HorizontalOptions="Center" />
+      <Label Text="Choose a profile" FontSize="24" FontAttributes="Bold"
+             TextColor="{StaticResource HdText}" HorizontalOptions="Center"
+             Margin="0,0,0,18" />
+      <FlexLayout x:Name="CardRow" Wrap="Wrap" JustifyContent="Center"
+                  AlignItems="Center">
+      </FlexLayout>
+      <HorizontalStackLayout Spacing="8" HorizontalOptions="Center" Margin="0,8,0,0">
+        <CheckBox x:Name="AskChk" Color="{StaticResource HdGold}" />
+        <Label Text="Ask every time" TextColor="{StaticResource HdDim}"
+               FontSize="13" VerticalOptions="Center">
+          <Label.GestureRecognizers>
+            <TapGestureRecognizer Tapped="OnAskTap" />
+          </Label.GestureRecognizers>
+        </Label>
+      </HorizontalStackLayout>
+      <HorizontalStackLayout Spacing="8" HorizontalOptions="Center" Margin="0,18,0,0">
+        <Label Text="v0.1.0" FontSize="11" TextColor="{StaticResource HdDim}"
+               VerticalOptions="Center" />
+        <Button Text="?" WidthRequest="26" HeightRequest="26" CornerRadius="13"
+                FontSize="12" Padding="0" TextColor="{StaticResource HdText}"
+                BackgroundColor="Transparent" BorderColor="#55504A" BorderWidth="1"
+                Clicked="OnHelp" />
+      </HorizontalStackLayout>
+    </VerticalStackLayout>
+  </ScrollView>
+</ContentPage>
