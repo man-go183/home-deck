@@ -1,11 +1,11 @@
 using Android.Webkit;
 using HomeDeck.Controls;
-using HomeDeck.Handlers;
+using HomeDeck;
 using HomeDeck.Services;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Maui.Storage;
 
-namespace HomeDeck;
+namespace HomeDeck.Handlers;
 
 /// <summary>Android WebView: JS bridge + per-request ad-block interception.</summary>
 public partial class ShellWebViewHandler
