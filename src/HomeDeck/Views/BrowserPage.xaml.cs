@@ -9,15 +9,13 @@ public partial class BrowserPage : ContentPage
 {
     readonly ProfileStore _store;
     readonly AdBlockService _ads;
-    readonly IServiceProvider _services;
     Profile? _profile;
 
-    public BrowserPage(ProfileStore store, AdBlockService ads, IServiceProvider services)
+    public BrowserPage(ProfileStore store, AdBlockService ads)
     {
         InitializeComponent();
         _store = store;
         _ads = ads;
-        _services = services;
 
         Web.Navigating += (_, e) =>
         {
