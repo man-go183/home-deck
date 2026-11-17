@@ -2,6 +2,7 @@ using HomeDeck.Controls;
 using HomeDeck.Handlers;
 using HomeDeck.Services;
 using HomeDeck.Views;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace HomeDeck;
 
