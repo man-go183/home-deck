@@ -1,0 +1,21 @@
+# ---> .NET + MAUI
+bin/
+obj/
+*.user
+*.suo
+.vs/
+TestResults/
+artifacts/
+
+# ---> packages / signing (never commit keys)
+*.keystore
+*.jks
+*.pfx
+*.p12
+secrets/
+
+# ---> OS / editors
+.DS_Store
+Thumbs.db
+*.swp
+.idea/
