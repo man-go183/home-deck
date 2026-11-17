@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+  <uses-sdk android:minSdkVersion="21" android:targetSdkVersion="34" />
+  <!-- v1 needs: network, vibration, notifications, keep-awake.
+       Camera/mic/location are stubbed in v1 — their permissions are
+       intentionally NOT declared until the bridge implements them. -->
+  <uses-permission android:name="android.permission.INTERNET" />
+  <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+  <uses-permission android:name="android.permission.VIBRATE" />
+  <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+  <uses-permission android:name="android.permission.WAKE_LOCK" />
+  <application android:allowBackup="true" android:supportsRtl="true"></application>
+</manifest>
