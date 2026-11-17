@@ -1,11 +1,11 @@
 using HomeDeck.Controls;
-using HomeDeck.Handlers;
+using HomeDeck;
 using HomeDeck.Services;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Maui.ApplicationModel;
 using Microsoft.Maui.Storage;
 
-namespace HomeDeck;
+namespace HomeDeck.Handlers;
 
 /// <summary>Windows WebView2: host object + per-request ad-block interception.</summary>
 public partial class ShellWebViewHandler
