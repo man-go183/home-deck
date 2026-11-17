@@ -34,24 +34,24 @@ class HomeDeckJsBridge : Java.Lang.Object
 
     static string JsonQuote(string s) => "'" + s.Replace("\\", "\\\\").Replace("'", "\\'") + "'";
 
-    [JavascriptInterface, Export("getBattery")] public string GetBattery() => DeviceBridge.GetBattery();
-    [JavascriptInterface, Export("getNetwork")] public string GetNetwork() => DeviceBridge.GetNetwork();
-    [JavascriptInterface, Export("getDevice")] public string GetDevice() => DeviceBridge.GetDevice();
-    [JavascriptInterface, Export("vibrate")] public string Vibrate(int millis) => DeviceBridge.Vibrate(millis);
+    [Android.Webkit.JavascriptInterface, Java.Interop.Export("getBattery")] public string GetBattery() => DeviceBridge.GetBattery();
+    [Android.Webkit.JavascriptInterface, Java.Interop.Export("getNetwork")] public string GetNetwork() => DeviceBridge.GetNetwork();
+    [Android.Webkit.JavascriptInterface, Java.Interop.Export("getDevice")] public string GetDevice() => DeviceBridge.GetDevice();
+    [Android.Webkit.JavascriptInterface, Java.Interop.Export("vibrate")] public string Vibrate(int millis) => DeviceBridge.Vibrate(millis);
 
-    [JavascriptInterface, Export("shareText")]
+    [Android.Webkit.JavascriptInterface, Java.Interop.Export("shareText")]
     public void ShareText(string id, string? text, string? title)
         => Task.Run(async () => Resolve(id, await DeviceBridge.ShareTextAsync(text, title)));
 
-    [JavascriptInterface, Export("clipboardWrite")]
+    [Android.Webkit.JavascriptInterface, Java.Interop.Export("clipboardWrite")]
     public void ClipboardWrite(string id, string? text)
         => Task.Run(async () => Resolve(id, await DeviceBridge.ClipboardWriteAsync(text)));
 
-    [JavascriptInterface, Export("clipboardRead")]
+    [Android.Webkit.JavascriptInterface, Java.Interop.Export("clipboardRead")]
     public void ClipboardRead(string id)
         => Task.Run(async () => Resolve(id, await DeviceBridge.ClipboardReadAsync()));
 
-    [JavascriptInterface, Export("notify")]
+    [Android.Webkit.JavascriptInterface, Java.Interop.Export("notify")]
     public void Notify(string id, string? title, string? body)
         => Task.Run(async () =>
         {
@@ -75,9 +75,9 @@ class HomeDeckJsBridge : Java.Lang.Object
         });
 
     // v1 stubs (surface exists so pages can feature-detect; implemented later)
-    [JavascriptInterface, Export("getLocation")] public string GetLocation() => DeviceBridge.NotImplemented("location");
-    [JavascriptInterface, Export("bleScan")] public string BleScan() => DeviceBridge.NotImplemented("ble");
-    [JavascriptInterface, Export("setBrightness")]
+    [Android.Webkit.JavascriptInterface, Java.Interop.Export("getLocation")] public string GetLocation() => DeviceBridge.NotImplemented("location");
+    [Android.Webkit.JavascriptInterface, Java.Interop.Export("bleScan")] public string BleScan() => DeviceBridge.NotImplemented("ble");
+    [Android.Webkit.JavascriptInterface, Java.Interop.Export("setBrightness")]
     public string SetBrightness(float level)
     {
         try
