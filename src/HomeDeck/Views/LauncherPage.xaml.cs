@@ -40,11 +40,49 @@ public partial class LauncherPage : ContentPage
         base.OnAppearing();
         try { Window.Title = "Home Deck"; } catch { }
 #if WINDOWS
-        // Caption buttons only: MAUI already extends content into the caption
-        // by default, so an empty title bar leaves just the system buttons.
-        // (Must stay visible-but-empty — an invisible bar gets no native view
-        // and MAUI falls back to its default icon + title row.)
-        try { Window.TitleBar = new Microsoft.Maui.Controls.TitleBar(); } catch { }
+        // Launcher caption header (mock .wapp): gradient dot + "Home Deck",
+        // left-aligned. No back, no pill — exactly the mock launcher state.
+        // (Must stay a visible-but-real bar — an empty/invisible one gets no
+        // native view and MAUI falls back to its default icon + title row.)
+        try
+        {
+            Window.TitleBar = new Microsoft.Maui.Controls.TitleBar
+            {
+                BackgroundColor = Colors.Transparent,
+                Content = new HorizontalStackLayout
+                {
+                    Spacing = 8,
+                    Padding = new Thickness(8, 0, 0, 0),
+                    VerticalOptions = LayoutOptions.Center,
+                    Children =
+                    {
+                        new BoxView
+                        {
+                            WidthRequest = 10,
+                            HeightRequest = 10,
+                            CornerRadius = 5,
+                            VerticalOptions = LayoutOptions.Center,
+                            Background = new LinearGradientBrush(
+                                new GradientStopCollection
+                                {
+                                    new GradientStop(Color.FromArgb("#e8b34a"), 0f),
+                                    new GradientStop(Color.FromArgb("#b3402e"), 1f),
+                                },
+                                new Point(0, 0), new Point(1, 1)),
+                        },
+                        new Label
+                        {
+                            Text = "Home Deck",
+                            FontSize = 12,
+                            CharacterSpacing = 0.5,
+                            TextColor = Color.FromRgba(242, 237, 232, 128),
+                            VerticalOptions = LayoutOptions.Center,
+                        },
+                    },
+                },
+            };
+        }
+        catch { }
 #endif
         // Warm the ad-block lists at launch (not on first profile open), so
         // they're ready before any tap. Fail-safe inside; never blocks UI.

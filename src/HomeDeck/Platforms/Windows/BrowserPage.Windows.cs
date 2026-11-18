@@ -56,6 +56,12 @@ public partial class BrowserPage
                 TitleBar.Children.Remove(BackBtn);
                 TitleBar.Children.Remove(Pill);
                 TitleBar.IsVisible = false;
+                // Caption layout = mock inner state: pill hugs the back
+                // button on the left (never centered), and the back loses
+                // its button box entirely (transparent, borderless).
+                Pill.HorizontalOptions = LayoutOptions.Start;
+                BackBtn.BorderWidth = 0;
+                BackBtn.BackgroundColor = Colors.Transparent;
                 // Collapse the now-empty in-page row so no dead band sits
                 // under the caption (the real bar lives in the title zone).
                 if (TitleBar.Parent is Grid outer && outer.RowDefinitions.Count > 0)
@@ -104,8 +110,8 @@ public partial class BrowserPage
                 _win.SizeChanged -= OnWinSizeChanged;
                 _win = null;
             }
-            // Stay extended and keep an empty caption: the launcher sets its
-            // own empty title bar on appearing. Never restore the framework
+            // Stay extended and keep a placeholder caption: the launcher sets
+            // its own dot header on appearing. Never restore the framework
             // default here — that is what painted the extra strip + white
             // caption when navigating back.
             if (Window != null)
