@@ -5,13 +5,15 @@
              x:Class="HomeDeck.Views.BrowserPage"
              Title="Home Deck"
              BackgroundColor="{StaticResource HdBg}">
-  <Grid RowDefinitions="Auto,*">
-    <!-- shell bar -->
-    <Grid Grid.Row="0" ColumnDefinitions="Auto,*,Auto" Padding="8,6"
-          BackgroundColor="#241F1A">
-      <Button x:Name="BackBtn" Text="‹" FontSize="20" WidthRequest="40"
+  <Grid RowDefinitions="40,*">
+    <!-- title-bar row. On Windows this grid IS the OS title-bar content
+         (see BrowserPage.Windows.cs); on Android it is hidden and the pill
+         moves into the native toolbar title view. -->
+    <Grid x:Name="TitleBar" Grid.Row="0" ColumnDefinitions="40,*,140"
+          Padding="4,0,0,0" BackgroundColor="#241F1A">
+      <Button x:Name="BackBtn" Text="‹" FontSize="18" WidthRequest="40"
               TextColor="{StaticResource HdText}" BackgroundColor="Transparent"
-              Clicked="OnBack" />
+              VerticalOptions="Center" Clicked="OnBack" />
       <HorizontalStackLayout x:Name="Pill" Grid.Column="1" Spacing="8"
                              VerticalOptions="Center" HorizontalOptions="Center">
         <Grid WidthRequest="26" HeightRequest="26" VerticalOptions="Center">
@@ -19,9 +21,12 @@
           <Label x:Name="PillGlyph" FontSize="12" FontAttributes="Bold"
                  TextColor="White" HorizontalOptions="Center"
                  VerticalOptions="Center" />
-          <Ellipse x:Name="PillShield" WidthRequest="11" HeightRequest="11"
-                   Fill="{StaticResource HdGold}"
-                   HorizontalOptions="End" VerticalOptions="End" />
+          <Path x:Name="PillShield" WidthRequest="12" HeightRequest="14"
+                Aspect="None" TranslationX="1" TranslationY="1"
+                Data="M6 0 L11 2.5 V7 C11 10.5 8.7 12.3 6 13.5 C3.3 12.3 1 10.5 1 7 V2.5 Z"
+                Fill="{StaticResource HdGold}"
+                Stroke="{StaticResource HdGoldDeep}" StrokeThickness="1"
+                HorizontalOptions="End" VerticalOptions="End" />
         </Grid>
         <Label x:Name="PillName" FontSize="14" FontAttributes="Bold"
                TextColor="{StaticResource HdText}" VerticalOptions="Center" />
@@ -31,9 +36,8 @@
           <TapGestureRecognizer Tapped="OnPillTap" />
         </Label.GestureRecognizers>
       </HorizontalStackLayout>
-      <Button Grid.Column="2" Text="☰" FontSize="16" WidthRequest="40"
-              TextColor="{StaticResource HdText}" BackgroundColor="Transparent"
-              Clicked="OnMenu" />
+      <!-- caption-button reserve (Windows min/max/close overlay this area) -->
+      <BoxView Grid.Column="2" Color="Transparent" />
     </Grid>
 
     <Grid Grid.Row="1">
