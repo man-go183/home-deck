@@ -10,7 +10,7 @@
          (see BrowserPage.Windows.cs); on Android it is hidden and the pill
          moves into the native toolbar title view. -->
     <Grid x:Name="TitleBar" Grid.Row="0" ColumnDefinitions="40,*,140"
-          Padding="4,0,0,0" BackgroundColor="#241F1A">
+          Padding="4,0,0,0" BackgroundColor="#000000">
       <Button x:Name="BackBtn" Text="‹" FontSize="18" WidthRequest="40"
               TextColor="{StaticResource HdText}" BackgroundColor="Transparent"
               VerticalOptions="Center" Clicked="OnBack" />
@@ -68,7 +68,7 @@
       </Grid>
       <!-- profile switcher dropdown -->
       <Border x:Name="Drop" IsVisible="false"
-              BackgroundColor="#1E1A16" Stroke="#3A342D"
+              BackgroundColor="#000000" Stroke="#3A342D"
               HorizontalOptions="Center" VerticalOptions="Start"
               Margin="0,8,0,0" Padding="6" MinimumWidthRequest="220">
         <Border.StrokeShape>

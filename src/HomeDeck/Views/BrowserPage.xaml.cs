@@ -270,29 +270,49 @@ public partial class BrowserPage : ContentPage
     void RebuildDrop()
     {
         DropList.Children.Clear();
-        foreach (var p in _store.Profiles.Where(p => p != _profile))
+        var others = _store.Profiles.Where(p => p != _profile).ToList();
+        if (others.Count == 0)
         {
-            var b = new Button
+            // Mock state with a single profile: dimmed, non-clickable row.
+            DropList.Children.Add(new Label
             {
-                Text = (p.AdBlock ? "◈ " : "") + p.Name,
-                BackgroundColor = Colors.Transparent,
-                TextColor = Colors.White, HorizontalOptions = LayoutOptions.Fill
-            };
-            var target = p;
-            b.Clicked += (_, _) => { Drop.IsVisible = false; BindProfile(target); };
-            DropList.Children.Add(b);
+                Text = "No other profiles",
+                FontSize = 13,
+                TextColor = (Color)Application.Current!.Resources["HdDim"],
+                Padding = new Thickness(10, 8),
+            });
         }
-        var manage = new Button
+        foreach (var p in others)
         {
-            Text = "Manage profiles…", BackgroundColor = Colors.Transparent,
-            TextColor = Colors.White, HorizontalOptions = LayoutOptions.Fill
-        };
-        manage.Clicked += async (_, _) => await Navigation.PopAsync();
-        DropList.Children.Add(manage);
+            // Mock profile row: avatar + name (no ◈ prefix — the pill
+            // shield already shows state), borderless with hover feedback.
+            var target = p;
+            var row = new HorizontalStackLayout
+            {
+                Spacing = 10,
+                Padding = new Thickness(10, 8),
+                Children =
+                {
+                    AvatarView.Build(p, 26),
+                    new Label
+                    {
+                        Text = p.Name,
+                        FontSize = 13,
+                        FontAttributes = FontAttributes.Bold,
+                        TextColor = Colors.White,
+                        VerticalOptions = LayoutOptions.Center,
+                    },
+                },
+            };
+            AddRowTap(row, () => { Drop.IsVisible = false; BindProfile(target); });
+            DropList.Children.Add(row);
+        }
+        DropList.Children.Add(MenuButton("Manage profiles…", async () => await Navigation.PopAsync()));
+        DropList.Children.Add(MenuDivider());
 
         if (_profile != null)
         {
-            var row = new HorizontalStackLayout { Spacing = 10, Padding = new Thickness(10, 6) };
+            var row = new HorizontalStackLayout { Spacing = 10, Padding = new Thickness(10, 8) };
             var cb = new CheckBox { IsChecked = _profile.AdBlock, Color = (Color)Application.Current!.Resources["HdGold"] };
             var lab = new Label { Text = "Block ads & trackers", TextColor = Colors.White, VerticalOptions = LayoutOptions.Center };
             cb.CheckedChanged += (_, e) =>
@@ -309,21 +329,53 @@ public partial class BrowserPage : ContentPage
                 Command = new Command(() => cb.IsChecked = !cb.IsChecked)
             });
             DropList.Children.Add(row);
+            DropList.Children.Add(MenuDivider());
 
-            var open = new Button
-            {
-                Text = "Open in browser", BackgroundColor = Colors.Transparent,
-                TextColor = Colors.White, HorizontalOptions = LayoutOptions.Fill
-            };
-            open.Clicked += async (_, _) =>
+            DropList.Children.Add(MenuButton("Open in browser ↗", async () =>
             {
                 Drop.IsVisible = false;
                 if (_profile != null)
                 {
                     try { await Launcher.OpenAsync(_profile.Url); } catch { }
                 }
-            };
-            DropList.Children.Add(open);
+            }));
         }
+    }
+
+    /// <summary>De-boxed menu button (native button borders show through on
+    /// Windows, so kill them explicitly). Slim mock-style padding.</summary>
+    static Button MenuButton(string text, Func<Task> onTap)
+    {
+        var b = new Button
+        {
+            Text = text,
+            FontSize = 13,
+            Padding = new Thickness(10, 8),
+            BorderWidth = 0,
+            BackgroundColor = Colors.Transparent,
+            TextColor = Colors.White,
+            HorizontalOptions = LayoutOptions.Fill,
+        };
+        b.Clicked += async (_, _) => await onTap();
+        return b;
+    }
+
+    /// <summary>Mock .wsep: hairline divider between menu sections.</summary>
+    static BoxView MenuDivider() => new()
+    {
+        HeightRequest = 1,
+        Color = Color.FromRgba(255, 255, 255, 0.08),
+        Margin = new Thickness(4, 5),
+        HorizontalOptions = LayoutOptions.Fill,
+    };
+
+    /// <summary>Borderless tap row with mock-style hover feedback.</summary>
+    static void AddRowTap(HorizontalStackLayout row, Action onTap)
+    {
+        row.GestureRecognizers.Add(new TapGestureRecognizer { Command = new Command(onTap) });
+        var hover = new PointerGestureRecognizer();
+        hover.PointerEntered += (_, _) => row.BackgroundColor = Color.FromRgba(255, 255, 255, 0.08);
+        hover.PointerExited += (_, _) => row.BackgroundColor = Colors.Transparent;
+        row.GestureRecognizers.Add(hover);
     }
 }

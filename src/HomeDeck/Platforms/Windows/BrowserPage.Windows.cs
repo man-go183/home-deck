@@ -92,7 +92,7 @@ public partial class BrowserPage
                 _winBar = new Microsoft.Maui.Controls.TitleBar
                 {
                     HeightRequest = 40,
-                    BackgroundColor = Color.FromArgb("#241F1A"),
+                    BackgroundColor = Color.FromArgb("#000000"),
                     Content = barGrid,
                 };
             }

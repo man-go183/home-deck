@@ -4,8 +4,8 @@
              x:Class="HomeDeck.App">
   <Application.Resources>
     <ResourceDictionary>
-      <Color x:Key="HdBg">#161311</Color>
-      <Color x:Key="HdCard">#242019</Color>
+      <Color x:Key="HdBg">#000000</Color>
+      <Color x:Key="HdCard">#000000</Color>
       <Color x:Key="HdGold">#E8B34A</Color>
       <Color x:Key="HdGoldDeep">#7A5C14</Color>
       <Color x:Key="HdText">#F2EDE8</Color>
