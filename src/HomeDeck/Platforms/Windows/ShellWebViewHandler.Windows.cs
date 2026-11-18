@@ -58,16 +58,32 @@ public partial class ShellWebViewHandler
             core.NavigationCompleted += async (_, _) =>
             {
                 try { await wv.ExecuteScriptAsync(js); } catch { }
-                try
-                {
-                    var css = _ads?.GetCosmeticCssForHost(view.PageHost) ?? "";
-                    if (!string.IsNullOrEmpty(css))
-                        await wv.ExecuteScriptAsync("var s=document.createElement('style');s.textContent=" + JsonSerializer.Serialize(css) + ";document.documentElement.appendChild(s);");
-                }
-                catch { }
+                try { await InjectCosmeticsAsync(wv, view); } catch { }
             };
         }
         catch { /* WebView2 missing: page area stays blank, shell still runs */ }
+    }
+
+    async Task InjectCosmeticsAsync(
+        Microsoft.UI.Xaml.Controls.WebView2 wv, ShellWebView view)
+    {
+        var ads = _ads;
+        if (ads == null || !view.AdBlockEnabled) return;
+        var pageHost = view.PageHost;
+        var css = ads.GetCosmeticCssForHost(pageHost);
+        if (!string.IsNullOrEmpty(css))
+            await wv.ExecuteScriptAsync("var s=document.createElement('style');s.textContent=" + JsonSerializer.Serialize(css) + ";document.documentElement.appendChild(s);");
+        string[] classes, ids;
+        try
+        {
+            var raw = await wv.ExecuteScriptAsync(AdBlockService.ClassSnapshotJs);
+            AdBlockService.ParseClassSnapshot(raw, out classes, out ids);
+        }
+        catch { return; }
+        if (classes.Length == 0 && ids.Length == 0) return;
+        var css2 = ads.GetCosmeticCssForClasses(pageHost, string.Join(",", classes), string.Join(",", ids));
+        if (!string.IsNullOrEmpty(css2) && css2 != css)
+            await wv.ExecuteScriptAsync("var s=document.createElement('style');s.textContent=" + JsonSerializer.Serialize(css2) + ";document.documentElement.appendChild(s);");
     }
 
     static string GuessType(string url, Microsoft.Web.WebView2.Core.CoreWebView2HttpRequestHeaders? headers)
