@@ -12,6 +12,8 @@ public partial class BrowserPage : ContentPage
     readonly AdBlockService _ads;
     Profile? _profile;
     CancellationTokenSource? _loadCts;
+    bool _appeared;
+    string? _pendingUrl;
 #if ANDROID
     bool _titleViewSet;
 #endif
@@ -25,6 +27,10 @@ public partial class BrowserPage : ContentPage
         // the title and the back button — hide them. Android keeps its native
         // toolbar: back + pill move there as the TitleView (see OnAppearing).
         NavigationPage.SetHasNavigationBar(this, false);
+        // Also hide MAUI's own caption back button: our ‹ covers back duty
+        // (WebView history first, then pop). Without this the framework draws
+        // a second back chevron in the caption area on Windows.
+        NavigationPage.SetHasBackButton(this, false);
 #endif
         _store = store;
         _ads = ads;
@@ -71,11 +77,21 @@ public partial class BrowserPage : ContentPage
         }
 #endif
         SetupCustomTitleBar();
+        _appeared = true;
+        if (_pendingUrl != null)
+        {
+            var url = _pendingUrl;
+            _pendingUrl = null;
+            var p = _profile;
+            if (p != null && p.Url == url)
+                StartNavigation(p);
+        }
     }
 
     protected override void OnDisappearing()
     {
         base.OnDisappearing();
+        _appeared = false;
         CancelWatchdog();
         ResetTitleBar();
     }
@@ -101,12 +117,16 @@ public partial class BrowserPage : ContentPage
 
         Web.AdBlockEnabled = p.AdBlock;
         try { Web.PageHost = new Uri(p.Url).Host; } catch { Web.PageHost = ""; }
-        Web.Source = new UrlWebViewSource { Url = p.Url };
-        Splash.IsVisible = true;
-
-        var cts = new CancellationTokenSource();
-        _loadCts = cts;
-        _ = WatchdogAsync(cts.Token, p);
+        if (_appeared)
+            StartNavigation(p);
+        else
+        {
+            // Page isn't on screen yet: starting the load now races WebView
+            // setup and the first navigation gets dropped (the stuck splash).
+            // Park the URL; OnAppearing starts the load once we're live.
+            _pendingUrl = p.Url;
+            Splash.IsVisible = true;
+        }
 
         try { Window.Title = $"{p.Name} – Home Deck"; } catch { }
 
@@ -119,6 +139,17 @@ public partial class BrowserPage : ContentPage
     {
         PillShield.IsVisible = p.AdBlock;
         PillSlash.IsVisible = !p.AdBlock;
+    }
+
+    /// <summary>Begin (or re-begin) loading a profile URL. Only ever called
+    /// while the page is on screen, so the WebView is ready to navigate.</summary>
+    void StartNavigation(Profile p)
+    {
+        Web.Source = new UrlWebViewSource { Url = p.Url };
+        Splash.IsVisible = true;
+        var cts = new CancellationTokenSource();
+        _loadCts = cts;
+        _ = WatchdogAsync(cts.Token, p);
     }
 
     /// <summary>Splash watchdog: a stuck load becomes an error with actions

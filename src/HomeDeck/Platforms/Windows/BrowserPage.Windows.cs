@@ -32,8 +32,23 @@ public partial class BrowserPage
             UpdateDragRects();
             win.SizeChanged -= OnWinSizeChanged;
             win.SizeChanged += OnWinSizeChanged;
+            ReplaceDefaultCaptionContent();
         }
         catch { /* keep the normal title bar */ }
+    }
+
+    /// <summary>Swap MAUI's default caption content (icon + window title +
+    /// framework back button) for an empty bar. The in-page TitleBar grid is
+    /// the real header and already sits in the caption area; caption buttons
+    /// stay system-drawn and dragging keeps working via our drag rects.</summary>
+    void ReplaceDefaultCaptionContent()
+    {
+        try
+        {
+            if (Window != null)
+                Window.TitleBar = new Microsoft.Maui.Controls.TitleBar { IsVisible = false };
+        }
+        catch { }
     }
 
     partial void ResetTitleBar()
@@ -46,6 +61,10 @@ public partial class BrowserPage
                 _win.AppWindow.TitleBar.ExtendsContentIntoTitleBar = false;
                 _win = null;
             }
+            // Hand the caption back to the framework default (icon + title)
+            // for the launcher.
+            if (Window != null)
+                Window.TitleBar = null;
         }
         catch { }
     }
