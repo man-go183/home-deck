@@ -53,6 +53,9 @@
           <Label x:Name="SplashName" FontSize="17" FontAttributes="Bold"
                  TextColor="{StaticResource HdText}"
                  HorizontalOptions="Center" />
+          <Label x:Name="SplashStatus" FontSize="11"
+                 TextColor="{StaticResource HdDim}"
+                 HorizontalOptions="Center" IsVisible="false" />
           <Label x:Name="SplashError" FontSize="13"
                  TextColor="{StaticResource HdGold}"
                  HorizontalOptions="Center" HorizontalTextAlignment="Center"

@@ -14,6 +14,7 @@ public partial class BrowserPage : ContentPage
     CancellationTokenSource? _loadCts;
     bool _appeared;
     string? _pendingUrl;
+    bool _navStarted;
 #if ANDROID
     bool _titleViewSet;
 #endif
@@ -37,11 +38,13 @@ public partial class BrowserPage : ContentPage
 
         Web.Navigating += (_, e) =>
         {
+            _navStarted = true;
             try { Web.PageHost = new Uri(e.Url).Host; } catch { }
         };
         Web.Navigated += async (_, e) =>
         {
             CancelWatchdog();
+            SplashStatus.IsVisible = false;
             try
             {
                 if (e.Result == WebNavigationResult.Failure)
@@ -147,9 +150,45 @@ public partial class BrowserPage : ContentPage
     {
         Web.Source = new UrlWebViewSource { Url = p.Url };
         Splash.IsVisible = true;
+        _navStarted = false;
+        SplashStatus.Text = "Loading…";
+        SplashStatus.IsVisible = true;
         var cts = new CancellationTokenSource();
         _loadCts = cts;
         _ = WatchdogAsync(cts.Token, p);
+        _ = KickMonitorAsync(cts.Token, p);
+    }
+
+    /// <summary>Proof-of-start monitor: appearing on screen doesn't mean the
+    /// WebView is ready, and a too-early navigation is silently dropped. If no
+    /// Navigating fires within a few seconds, re-set the URL to kick it.
+    /// Silent, bounded, superseded by the next load.</summary>
+    async Task KickMonitorAsync(CancellationToken token, Profile p)
+    {
+        try
+        {
+            for (int kick = 0; kick < 3; kick++)
+            {
+                await Task.Delay(3000, token);
+                if (token.IsCancellationRequested) return;
+                if (_navStarted) return;
+                MainThread.BeginInvokeOnMainThread(() =>
+                {
+                    try
+                    {
+                        if (!_navStarted && _profile == p)
+                        {
+                            SplashStatus.Text = "Retrying…";
+                            SplashStatus.IsVisible = true;
+                            Web.Source = null;
+                            Web.Source = new UrlWebViewSource { Url = p.Url };
+                        }
+                    }
+                    catch { }
+                });
+            }
+        }
+        catch { } // superseded by a newer load
     }
 
     /// <summary>Splash watchdog: a stuck load becomes an error with actions
@@ -180,6 +219,7 @@ public partial class BrowserPage : ContentPage
     {
         try
         {
+            SplashStatus.IsVisible = false;
             SplashError.Text = msg;
             SplashError.IsVisible = true;
             SplashRetry.IsVisible = true;
