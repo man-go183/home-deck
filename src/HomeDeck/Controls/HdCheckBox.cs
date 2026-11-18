@@ -27,11 +27,11 @@ public class HdCheckBox : ContentView
     public event EventHandler<bool>? CheckedChanged;
 
     readonly Border _box;
-    readonly Path _tick;
+    readonly Microsoft.Maui.Controls.Shapes.Path _tick;
 
     public HdCheckBox()
     {
-        _tick = new Path
+        _tick = new Microsoft.Maui.Controls.Shapes.Path
         {
             Data = (Geometry)new PathGeometryConverter().ConvertFromInvariantString("M5 10l4 4 8-9"),
             Stroke = Color.FromArgb("#161311"),
