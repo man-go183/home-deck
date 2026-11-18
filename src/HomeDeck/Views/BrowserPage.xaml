@@ -61,10 +61,6 @@
                   BackgroundColor="{StaticResource HdGold}" TextColor="#161311"
                   CornerRadius="10" HorizontalOptions="Center"
                   Clicked="OnSplashRetry" />
-          <Button x:Name="SplashOpenExt" Text="Open in browser" IsVisible="false"
-                  BackgroundColor="Transparent"
-                  TextColor="{StaticResource HdDim}"
-                  HorizontalOptions="Center" Clicked="OnSplashOpenExt" />
         </VerticalStackLayout>
       </Grid>
       <!-- profile switcher dropdown -->

@@ -152,7 +152,6 @@ public partial class BrowserPage : ContentPage
             SplashError.Text = msg;
             SplashError.IsVisible = true;
             SplashRetry.IsVisible = true;
-            SplashOpenExt.IsVisible = true;
         }
         catch { }
     }
@@ -163,7 +162,6 @@ public partial class BrowserPage : ContentPage
         {
             SplashError.IsVisible = false;
             SplashRetry.IsVisible = false;
-            SplashOpenExt.IsVisible = false;
         }
         catch { }
     }
@@ -174,12 +172,6 @@ public partial class BrowserPage : ContentPage
         if (p == null) return;
         Web.Source = null; // force a fresh navigation even for the same URL
         BindProfile(p);
-    }
-
-    async void OnSplashOpenExt(object? sender, EventArgs e)
-    {
-        if (_profile == null) return;
-        try { await Launcher.OpenAsync(_profile.Url); } catch { }
     }
 
     static string Glyph(Profile p)
