@@ -59,18 +59,35 @@ public partial class BrowserPage
                 // Collapse the now-empty in-page row so no dead band sits
                 // under the caption (the real bar lives in the title zone).
                 if (TitleBar.Parent is Grid outer && outer.RowDefinitions.Count > 0)
-                    outer.RowDefinitions[0].Height = Microsoft.Maui.Controls.GridLength.Auto;
+                    outer.RowDefinitions[0].Height = Microsoft.Maui.GridLength.Auto;
+                // TitleBar only takes a single Content view (no LeadingView /
+                // TrailingView in this SDK), so wrap back + pill + spacer in
+                // a 3-column grid that mirrors the in-page layout.
+                var spacer = new BoxView
+                {
+                    WidthRequest = 140,
+                    Color = Colors.Transparent,
+                };
+                var barGrid = new Grid
+                {
+                    ColumnDefinitions =
+                    {
+                        new ColumnDefinition { Width = new Microsoft.Maui.GridLength(40) },
+                        new ColumnDefinition { Width = Microsoft.Maui.GridLength.Star },
+                        new ColumnDefinition { Width = new Microsoft.Maui.GridLength(140) },
+                    },
+                };
+                barGrid.Children.Add(BackBtn);
+                barGrid.Children.Add(Pill);
+                barGrid.Children.Add(spacer);
+                Grid.SetColumn(BackBtn, 0);
+                Grid.SetColumn(Pill, 1);
+                Grid.SetColumn(spacer, 2);
                 _winBar = new Microsoft.Maui.Controls.TitleBar
                 {
                     HeightRequest = 40,
                     BackgroundColor = Color.FromArgb("#241F1A"),
-                    LeadingView = BackBtn,
-                    Content = Pill,
-                    TrailingView = new BoxView
-                    {
-                        WidthRequest = 140,
-                        Color = Colors.Transparent,
-                    },
+                    Content = barGrid,
                 };
             }
             Window.TitleBar = _winBar;
