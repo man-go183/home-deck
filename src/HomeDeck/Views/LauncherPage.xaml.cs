@@ -13,10 +13,11 @@ public partial class LauncherPage : ContentPage
 {
     readonly ProfileStore _store;
     readonly IServiceProvider _services;
+    readonly AdBlockService _ads;
     bool _adding;
     Profile? _avaEditing;
 
-    public LauncherPage(ProfileStore store, IServiceProvider services)
+    public LauncherPage(ProfileStore store, IServiceProvider services, AdBlockService ads)
     {
         InitializeComponent();
 #if WINDOWS
@@ -26,6 +27,7 @@ public partial class LauncherPage : ContentPage
 #endif
         _store = store;
         _services = services;
+        _ads = ads;
         AskChk.CheckedChanged += (_, _) =>
         {
             _store.Prefs.AskEveryTime = AskChk.IsChecked;
@@ -44,6 +46,9 @@ public partial class LauncherPage : ContentPage
         // and MAUI falls back to its default icon + title row.)
         try { Window.TitleBar = new Microsoft.Maui.Controls.TitleBar(); } catch { }
 #endif
+        // Warm the ad-block lists at launch (not on first profile open), so
+        // they're ready before any tap. Fail-safe inside; never blocks UI.
+        _ = _ads.EnsureLoadedAsync();
         await _store.LoadAsync();
         AskChk.IsChecked = _store.Prefs.AskEveryTime;
         BuildCards();
