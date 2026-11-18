@@ -26,6 +26,7 @@ public partial class LauncherPage : ContentPage
     protected override async void OnAppearing()
     {
         base.OnAppearing();
+        try { Window.Title = "Home Deck"; } catch { }
         await _store.LoadAsync();
         AskChk.IsChecked = _store.Prefs.AskEveryTime;
         BuildCards();
@@ -61,15 +62,26 @@ public partial class LauncherPage : ContentPage
             FontSize = 24, FontAttributes = FontAttributes.Bold, TextColor = Colors.White,
             HorizontalOptions = LayoutOptions.Center, VerticalOptions = LayoutOptions.Center
         };
-        var shield = new BoxView
+        var shield = new Path
         {
-            WidthRequest = 10, HeightRequest = 10, CornerRadius = 5,
-            Color = (Color)Application.Current.Resources["HdGold"],
+            WidthRequest = 15, HeightRequest = 17, Aspect = Stretch.None,
+            TranslationX = 1, TranslationY = 1,
+            Data = (Geometry)new PathGeometryConverter().ConvertFromInvariantString(
+                "M6 0 L11 2.5 V7 C11 10.5 8.7 12.3 6 13.5 C3.3 12.3 1 10.5 1 7 V2.5 Z"),
+            Fill = (Color)Application.Current.Resources["HdGold"],
+            Stroke = (Color)Application.Current.Resources["HdGoldDeep"],
+            StrokeThickness = 1,
             IsVisible = p.AdBlock,
-            HorizontalOptions = LayoutOptions.End, VerticalOptions = LayoutOptions.End,
-            Margin = new Thickness(0, 0, 18, 0)
+            HorizontalOptions = LayoutOptions.End, VerticalOptions = LayoutOptions.End
         };
-        var face = new Grid { avatar, glyph, shield };
+        // Face grid is exactly avatar-sized and centered, so End/End anchors
+        // the shield to the avatar's corner (not the card's).
+        var face = new Grid
+        {
+            WidthRequest = 64, HeightRequest = 64,
+            HorizontalOptions = LayoutOptions.Center,
+            Children = { avatar, glyph, shield }
+        };
 
         var box = new VerticalStackLayout
         {
@@ -210,7 +222,7 @@ public partial class LauncherPage : ContentPage
             "3. + adds a profile (ad-blocking on by default).\n" +
             "4. In the app, tap your profile in the header to switch.\n" +
             "5. Uncheck Ask every time to reopen your last profile.\n" +
-            "6. The gold dot = ad & tracker blocking is on for that profile.",
+            "6. The gold shield = ad & tracker blocking is on for that profile.",
             "Got it");
     }
 }
