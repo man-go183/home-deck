@@ -26,6 +26,14 @@
   <ItemGroup Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'windows'">
     <Content Include="Platforms\Windows\Assets\*.png" />
     <MauiXaml Remove="Platforms\Windows\App.xaml" />
+    <!-- hdblock native blocker, built by CI (see windows.yml). Missing file = blocking off, build still works. -->
+    <Content Include="runtimes\win-x64\native\hdblock.dll" Condition="Exists('runtimes\win-x64\native\hdblock.dll')" CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'android'">
+    <!-- Same deal: CI-built .so files, gitignored. Absent = blocking off. -->
+    <AndroidNativeLibrary Include="runtimes\android-arm64\native\libhdblock.so" Abi="arm64-v8a" Condition="Exists('runtimes\android-arm64\native\libhdblock.so')" />
+    <AndroidNativeLibrary Include="runtimes\android-x64\native\libhdblock.so" Abi="x86_64" Condition="Exists('runtimes\android-x64\native\libhdblock.so')" />
   </ItemGroup>
 
   <!-- v1 ships no custom icon/splash assets on purpose (see README).
