@@ -40,13 +40,7 @@ public partial class ShellWebViewHandler
                 v.Navigated += async (_, _) =>
                 {
                     try { await v.EvaluateJavaScriptAsync(js); } catch { }
-                    try
-                    {
-                        var css = _ads?.GetCosmeticCssForHost(v.PageHost) ?? "";
-                        if (!string.IsNullOrEmpty(css))
-                            await v.EvaluateJavaScriptAsync("var s=document.createElement('style');s.textContent=" + JsonSerializer.Serialize(css) + ";document.documentElement.appendChild(s);");
-                    }
-                    catch { }
+                    try { await InjectCosmeticsAsync(v); } catch { }
                 };
         }
         catch { }
@@ -56,6 +50,27 @@ public partial class ShellWebViewHandler
     {
         try { platformView.RemoveJavascriptInterface("HomeDeckNative"); } catch { }
         base.DisconnectHandler(platformView);
+    }
+
+    async Task InjectCosmeticsAsync(ShellWebView v)
+    {
+        var ads = _ads;
+        if (ads == null || !v.AdBlockEnabled) return;
+        var pageHost = v.PageHost;
+        var css = ads.GetCosmeticCssForHost(pageHost);
+        if (!string.IsNullOrEmpty(css))
+            await v.EvaluateJavaScriptAsync("var s=document.createElement('style');s.textContent=" + JsonSerializer.Serialize(css) + ";document.documentElement.appendChild(s);");
+        string[] classes, ids;
+        try
+        {
+            var raw = await v.EvaluateJavaScriptAsync(AdBlockService.ClassSnapshotJs);
+            AdBlockService.ParseClassSnapshot(raw, out classes, out ids);
+        }
+        catch { return; }
+        if (classes.Length == 0 && ids.Length == 0) return;
+        var css2 = ads.GetCosmeticCssForClasses(pageHost, string.Join(",", classes), string.Join(",", ids));
+        if (!string.IsNullOrEmpty(css2) && css2 != css)
+            await v.EvaluateJavaScriptAsync("var s=document.createElement('style');s.textContent=" + JsonSerializer.Serialize(css2) + ";document.documentElement.appendChild(s);");
     }
 
     sealed class ShellWebViewClient : WebViewClient
