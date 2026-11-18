@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="utf-8" ?>
 <ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
              xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             xmlns:ctrl="clr-namespace:HomeDeck.Controls"
              x:Class="HomeDeck.Views.LauncherPage"
              Title="Home Deck"
              BackgroundColor="{StaticResource HdBg}">
@@ -17,9 +18,7 @@
                     AlignItems="Center">
         </FlexLayout>
         <HorizontalStackLayout Spacing="8" HorizontalOptions="Center" Margin="0,8,0,0">
-          <CheckBox x:Name="AskChk" Color="{StaticResource HdGold}"
-                    WidthRequest="20" HeightRequest="20"
-                    VerticalOptions="Center" />
+          <ctrl:HdCheckBox x:Name="AskChk" VerticalOptions="Center" />
           <Label Text="Ask every time" TextColor="{StaticResource HdDim}"
                  FontSize="13" VerticalOptions="Center">
             <Label.GestureRecognizers>

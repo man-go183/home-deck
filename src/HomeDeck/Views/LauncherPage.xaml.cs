@@ -154,11 +154,16 @@ public partial class LauncherPage : ContentPage
         });
         face.Children.Add(front);
 
-        // edit face
-        var edit = new VerticalStackLayout { Spacing = 8, IsVisible = false };
+        // edit face (mock .editbox: compact, centered, ad toggle + side-by-side buttons)
+        var edit = new VerticalStackLayout
+        {
+            Spacing = 8,
+            IsVisible = false,
+            VerticalOptions = LayoutOptions.Center,
+        };
         var editAva = new Grid
         {
-            WidthRequest = 64, HeightRequest = 64,
+            WidthRequest = 52, HeightRequest = 52,
             HorizontalOptions = LayoutOptions.Center
         };
         RefreshEditAvatar(editAva, p);
@@ -192,8 +197,10 @@ public partial class LauncherPage : ContentPage
         var save = new Button
         {
             Text = "Save", BackgroundColor = (Color)Application.Current.Resources["HdGold"],
-            TextColor = (Color)Application.Current.Resources["HdBg"], CornerRadius = 10
+            TextColor = (Color)Application.Current.Resources["HdBg"], CornerRadius = 8,
+            Padding = new Thickness(14, 7), FontSize = 13
         };
+        var adChk = new HdCheckBox { IsChecked = p.AdBlock };
         save.Clicked += (_, _) =>
         {
             var name = (nameEntry.Text ?? "").Trim();
@@ -202,13 +209,16 @@ public partial class LauncherPage : ContentPage
             if (url.Length > 0 && !url.StartsWith("http", StringComparison.OrdinalIgnoreCase))
                 url = "https://" + url;
             if (url.Length > 0) p.Url = url;
+            p.AdBlock = adChk.IsChecked;
             _store.SaveProfiles();
             BuildCards();
         };
         var del = new Button
         {
             Text = "Delete", BackgroundColor = Colors.Transparent,
-            TextColor = Color.FromArgb("#E14B32")
+            TextColor = Color.FromArgb("#E14B32"),
+            BorderColor = Color.FromRgba(225, 75, 50, 102), BorderWidth = 1,
+            CornerRadius = 8, Padding = new Thickness(14, 7), FontSize = 13
         };
         del.Clicked += async (_, _) =>
         {
@@ -221,9 +231,29 @@ public partial class LauncherPage : ContentPage
         edit.Children.Add(nameEntry);
         edit.Children.Add(linkEntry);
         edit.Children.Add(warn);
-        edit.Children.Add(save);
-        edit.Children.Add(del);
-        face.Children.Add(edit);
+        var adRow = new HorizontalStackLayout { Spacing = 8 };
+        var adLab = new Label
+        {
+            Text = "Block ads & trackers", TextColor = Colors.White,
+            FontSize = 12, VerticalOptions = LayoutOptions.Center
+        };
+        adLab.GestureRecognizers.Add(new TapGestureRecognizer
+        {
+            Command = new Command(() => adChk.IsChecked = !adChk.IsChecked)
+        });
+        adRow.Children.Add(adChk);
+        adRow.Children.Add(adLab);
+        edit.Children.Add(adRow);
+        var editBtns = new HorizontalStackLayout
+        {
+            Spacing = 7, HorizontalOptions = LayoutOptions.Center
+        };
+        editBtns.Children.Add(save);
+        editBtns.Children.Add(del);
+        edit.Children.Add(editBtns);
+        // Scroll safety: tall native rows must never clip the buttons.
+        var editScroll = new ScrollView { Content = edit };
+        face.Children.Add(editScroll);
 
         var card = new Border
         {
@@ -340,7 +370,7 @@ public partial class LauncherPage : ContentPage
     {
         host.Children.Clear();
         // pen button is re-added by the caller after this call
-        host.Children.Add(AvatarView.Build(p, 64));
+        host.Children.Add(AvatarView.Build(p, 52));
     }
 
     View MakeAddCard()
@@ -407,9 +437,9 @@ public partial class LauncherPage : ContentPage
             catch { }
         };
         var blockRow = new HorizontalStackLayout { Spacing = 8 };
-        var blockChk = new CheckBox
+        var blockChk = new HdCheckBox
         {
-            IsChecked = true, Color = (Color)Application.Current.Resources["HdGold"],
+            IsChecked = true,
             VerticalOptions = LayoutOptions.Center
         };
         var blockLab = new Label
