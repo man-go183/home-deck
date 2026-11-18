@@ -19,3 +19,7 @@ secrets/
 Thumbs.db
 *.swp
 .idea/
+
+# ---> Rust build outputs + CI-staged native libs (rebuilt every run, never commit)
+src/native/hdblock/target/
+src/HomeDeck/runtimes/
