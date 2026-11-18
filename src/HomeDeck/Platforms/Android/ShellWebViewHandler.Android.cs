@@ -1,6 +1,8 @@
+using System.Linq;
+using System.Text.Json;
 using Android.Webkit;
-using HomeDeck.Controls;
 using HomeDeck;
+using HomeDeck.Controls;
 using HomeDeck.Services;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Maui.Storage;
@@ -38,6 +40,13 @@ public partial class ShellWebViewHandler
                 v.Navigated += async (_, _) =>
                 {
                     try { await v.EvaluateJavaScriptAsync(js); } catch { }
+                    try
+                    {
+                        var css = _ads?.GetCosmeticCssForHost(v.PageHost) ?? "";
+                        if (!string.IsNullOrEmpty(css))
+                            await v.EvaluateJavaScriptAsync("var s=document.createElement('style');s.textContent=" + JsonSerializer.Serialize(css) + ";document.documentElement.appendChild(s);");
+                    }
+                    catch { }
                 };
         }
         catch { }
@@ -80,13 +89,19 @@ public partial class ShellWebViewHandler
 
         static string GuessType(string url, IDictionary<string, string>? headers)
         {
+            try
+            {
+                if (headers != null && headers.Keys.Any(k => k.Equals("X-Requested-With", StringComparison.OrdinalIgnoreCase)))
+                    return "xmlhttprequest";
+            }
+            catch { }
             var u = url.ToLowerInvariant();
             if (u.EndsWith(".js")) return "script";
             if (u.EndsWith(".css")) return "stylesheet";
             if (u.EndsWith(".png") || u.EndsWith(".jpg") || u.EndsWith(".jpeg") ||
                 u.EndsWith(".gif") || u.EndsWith(".webp") || u.EndsWith(".svg")) return "image";
-            if (u.EndsWith(".woff") || u.EndsWith(".woff2") || u.EndsWith(".ttf")) return "font";
-            if (u.EndsWith(".mp4") || u.EndsWith(".mp3") || u.EndsWith(".webm")) return "media";
+            if (u.EndsWith(".woff") || u.EndsWith(".woff2") || u.EndsWith(".ttf") || u.EndsWith(".otf")) return "font";
+            if (u.EndsWith(".mp4") || u.EndsWith(".mp3") || u.EndsWith(".webm") || u.EndsWith(".ogg") || u.EndsWith(".m4a")) return "media";
             return "other";
         }
     }
