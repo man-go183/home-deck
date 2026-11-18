@@ -112,9 +112,60 @@ pub extern "C" fn hdblock_should_block(
     }
 }
 
-/// Element-hide CSS for a page URL (`{display:none!important}`), or null when
-/// there is nothing to hide. Free with `hdblock_free_string`. Scriptlets and
-/// procedural filters are intentionally not executed (phase 1).
+/// Generic-aware element-hide CSS: URL-specific selectors plus generic
+/// selectors matching the page's classes/ids (comma-separated). This is the
+/// call that makes generic `##` rules (the majority of cosmetic filters)
+/// work — `url_cosmetic_resources` alone only covers URL-specific rules.
+/// Returns null when there is nothing to hide. Free with
+/// `hdblock_free_string`. Scriptlets and procedural actions are intentionally
+/// not executed (phase 1).
+#[no_mangle]
+pub extern "C" fn hdblock_cosmetic_css_for_classes(
+    handle: *const Engine,
+    url_ptr: *const c_char,
+    url_len: usize,
+    classes_ptr: *const c_char,
+    classes_len: usize,
+    ids_ptr: *const c_char,
+    ids_len: usize,
+) -> *mut c_char {
+    let result = panic::catch_unwind(AssertUnwindSafe(|| {
+        let engine = unsafe { handle.as_ref() }.ok_or(())?;
+        let url = read_str(url_ptr, url_len).ok_or(())?;
+        let classes = read_str(classes_ptr, classes_len).unwrap_or_default();
+        let ids = read_str(ids_ptr, ids_len).unwrap_or_default();
+        let res = engine.url_cosmetic_resources(&url);
+        let mut sels: std::collections::HashSet<String> = res.hide_selectors;
+        if !res.generichide {
+            let class_list: Vec<&str> = classes
+                .split(',')
+                .map(|s| s.trim())
+                .filter(|s| !s.is_empty())
+                .collect();
+            let id_list: Vec<&str> = ids
+                .split(',')
+                .map(|s| s.trim())
+                .filter(|s| !s.is_empty())
+                .collect();
+            for s in engine.hidden_class_id_selectors(class_list, id_list, &res.exceptions) {
+                sels.insert(s);
+            }
+        }
+        if sels.is_empty() {
+            return Err(());
+        }
+        let mut ordered: Vec<&str> = sels.iter().map(|s| s.as_str()).collect();
+        ordered.sort_unstable();
+        Ok::<String, ()>(format!("{}{{display:none!important}}", ordered.join(",")))
+    }));
+    match result {
+        Ok(Ok(css)) => match CString::new(css) {
+            Ok(c) => c.into_raw(),
+            Err(_) => ptr::null_mut(),
+        },
+        _ => ptr::null_mut(),
+    }
+}
 #[no_mangle]
 pub extern "C" fn hdblock_cosmetic_css(
     handle: *const Engine,
@@ -164,8 +215,9 @@ mod tests {
     const LISTS: &str = "\
 ||ads.example.com^\n\
 @@||ads.example.com/allowed^\n\
-||cdn.example.com^$third-party\n\
+||cdn.other.com^$third-party\n\
 ||img.example.com^$image\n\
+news.example.com##.site-ad\n\
 ##.ad-banner\n";
 
     fn engine() -> Engine {
@@ -201,16 +253,18 @@ mod tests {
     #[test]
     fn third_party_option_respected() {
         let e = engine();
-        // same site: first-party, $third-party rule must not match
+        // eTLD+1 differs => third party. cdn.other.com vs news.example.com
+        // are different sites; cdn.example.com vs news.example.com would NOT
+        // be (same eTLD+1) — that is correct engine behavior.
         let first = req(
-            "https://cdn.example.com/app.js",
-            "https://cdn.example.com/",
+            "https://cdn.other.com/app.js",
+            "https://cdn.other.com/",
             "script",
         );
         assert!(!e.check_network_request(&first).should_block());
         // other site: third-party, must match
         let third = req(
-            "https://cdn.example.com/app.js",
+            "https://cdn.other.com/app.js",
             "https://news.example.com/",
             "script",
         );
@@ -235,10 +289,23 @@ mod tests {
     }
 
     #[test]
-    fn cosmetic_selectors_returned() {
+    fn cosmetic_specific_rule_returned() {
+        // Hostname-specific rule: covered by url_cosmetic_resources alone.
         let e = engine();
         let res = e.url_cosmetic_resources("https://news.example.com/article");
-        assert!(res.hide_selectors.contains(".ad-banner"));
+        assert!(res.hide_selectors.contains(".site-ad"));
+    }
+
+    #[test]
+    fn cosmetic_generic_rule_needs_classes() {
+        // Generic ## rules are NOT in url_cosmetic_resources — the wrapper's
+        // for_classes call resolves them against the page's classes/ids.
+        let e = engine();
+        let res = e.url_cosmetic_resources("https://news.example.com/article");
+        assert!(!res.hide_selectors.contains(".ad-banner"));
+        let matched =
+            e.hidden_class_id_selectors(["ad-banner", "content"], ["main"], &res.exceptions);
+        assert!(matched.iter().any(|s| s == ".ad-banner"));
     }
 
     #[test]
@@ -265,14 +332,21 @@ mod tests {
                 1
             );
             let page_url = CString::new("https://news.example.com/article").unwrap();
-            let css = hdblock_cosmetic_css(
+            let classes = CString::new("content,ad-banner").unwrap();
+            let ids = CString::new("main").unwrap();
+            let css = hdblock_cosmetic_css_for_classes(
                 h,
                 page_url.as_ptr(),
                 "https://news.example.com/article".len(),
+                classes.as_ptr(),
+                "content,ad-banner".len(),
+                ids.as_ptr(),
+                "main".len(),
             );
             assert!(!css.is_null());
             let s = CStr::from_ptr(css).to_string_lossy().into_owned();
             assert!(s.contains(".ad-banner"));
+            assert!(s.contains(".site-ad"));
             hdblock_free_string(css);
             hdblock_destroy(h);
         }
