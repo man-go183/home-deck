@@ -53,6 +53,18 @@
           <Label x:Name="SplashName" FontSize="17" FontAttributes="Bold"
                  TextColor="{StaticResource HdText}"
                  HorizontalOptions="Center" />
+          <Label x:Name="SplashError" FontSize="13"
+                 TextColor="{StaticResource HdGold}"
+                 HorizontalOptions="Center" HorizontalTextAlignment="Center"
+                 Margin="24,4,24,0" IsVisible="false" />
+          <Button x:Name="SplashRetry" Text="Try again" IsVisible="false"
+                  BackgroundColor="{StaticResource HdGold}" TextColor="#161311"
+                  CornerRadius="10" HorizontalOptions="Center"
+                  Clicked="OnSplashRetry" />
+          <Button x:Name="SplashOpenExt" Text="Open in browser" IsVisible="false"
+                  BackgroundColor="Transparent"
+                  TextColor="{StaticResource HdDim}"
+                  HorizontalOptions="Center" Clicked="OnSplashOpenExt" />
         </VerticalStackLayout>
       </Grid>
       <!-- profile switcher dropdown -->

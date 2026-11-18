@@ -11,6 +11,7 @@ public partial class BrowserPage : ContentPage
     readonly ProfileStore _store;
     readonly AdBlockService _ads;
     Profile? _profile;
+    CancellationTokenSource? _loadCts;
 #if ANDROID
     bool _titleViewSet;
 #endif
@@ -18,6 +19,13 @@ public partial class BrowserPage : ContentPage
     public BrowserPage(ProfileStore store, AdBlockService ads)
     {
         InitializeComponent();
+#if WINDOWS
+        // The in-page TitleBar grid IS the app header (it extends into the OS
+        // caption). The NavigationPage toolbar + large header would duplicate
+        // the title and the back button — hide them. Android keeps its native
+        // toolbar: back + pill move there as the TitleView (see OnAppearing).
+        NavigationPage.SetHasNavigationBar(this, false);
+#endif
         _store = store;
         _ads = ads;
 
@@ -25,10 +33,16 @@ public partial class BrowserPage : ContentPage
         {
             try { Web.PageHost = new Uri(e.Url).Host; } catch { }
         };
-        Web.Navigated += async (_, _) =>
+        Web.Navigated += async (_, e) =>
         {
+            CancelWatchdog();
             try
             {
+                if (e.Result == WebNavigationResult.Failure)
+                {
+                    ShowSplashError("Couldn't load this page.");
+                    return;
+                }
                 await Splash.FadeToAsync(0, 200);
                 Splash.IsVisible = false;
                 Splash.Opacity = 1;
@@ -62,6 +76,7 @@ public partial class BrowserPage : ContentPage
     protected override void OnDisappearing()
     {
         base.OnDisappearing();
+        CancelWatchdog();
         ResetTitleBar();
     }
 
@@ -74,6 +89,8 @@ public partial class BrowserPage : ContentPage
     {
         _profile = p;
         Drop.IsVisible = false;
+        CancelWatchdog();
+        HideSplashError();
         PillName.Text = p.Name;
         PillAvaBox.Children.Clear();
         PillAvaBox.Children.Add(AvatarView.Build(p, 26));
@@ -87,6 +104,10 @@ public partial class BrowserPage : ContentPage
         Web.Source = new UrlWebViewSource { Url = p.Url };
         Splash.IsVisible = true;
 
+        var cts = new CancellationTokenSource();
+        _loadCts = cts;
+        _ = WatchdogAsync(cts.Token, p);
+
         try { Window.Title = $"{p.Name} – Home Deck"; } catch { }
 
         _store.Prefs.LastProfileId = p.Id;
@@ -98,6 +119,67 @@ public partial class BrowserPage : ContentPage
     {
         PillShield.IsVisible = p.AdBlock;
         PillSlash.IsVisible = !p.AdBlock;
+    }
+
+    /// <summary>Splash watchdog: a stuck load becomes an error with actions
+    /// instead of an eternal spinner. Superseded by the next BindProfile.</summary>
+    void CancelWatchdog()
+    {
+        try { _loadCts?.Cancel(); } catch { }
+        _loadCts = null;
+    }
+
+    async Task WatchdogAsync(CancellationToken token, Profile p)
+    {
+        try { await Task.Delay(TimeSpan.FromSeconds(15), token); }
+        catch { return; } // superseded by a newer load
+        if (token.IsCancellationRequested) return;
+        MainThread.BeginInvokeOnMainThread(() =>
+        {
+            try
+            {
+                if (Splash.IsVisible && !SplashError.IsVisible)
+                    ShowSplashError($"Still loading {p.Name} — the page hasn't responded. Check your connection, then try again.");
+            }
+            catch { }
+        });
+    }
+
+    void ShowSplashError(string msg)
+    {
+        try
+        {
+            SplashError.Text = msg;
+            SplashError.IsVisible = true;
+            SplashRetry.IsVisible = true;
+            SplashOpenExt.IsVisible = true;
+        }
+        catch { }
+    }
+
+    void HideSplashError()
+    {
+        try
+        {
+            SplashError.IsVisible = false;
+            SplashRetry.IsVisible = false;
+            SplashOpenExt.IsVisible = false;
+        }
+        catch { }
+    }
+
+    void OnSplashRetry(object? sender, EventArgs e)
+    {
+        var p = _profile;
+        if (p == null) return;
+        Web.Source = null; // force a fresh navigation even for the same URL
+        BindProfile(p);
+    }
+
+    async void OnSplashOpenExt(object? sender, EventArgs e)
+    {
+        if (_profile == null) return;
+        try { await Launcher.OpenAsync(_profile.Url); } catch { }
     }
 
     static string Glyph(Profile p)

@@ -19,6 +19,11 @@ public partial class LauncherPage : ContentPage
     public LauncherPage(ProfileStore store, IServiceProvider services)
     {
         InitializeComponent();
+#if WINDOWS
+        // The OS draws the caption itself; the NavigationPage toolbar (plus
+        // its large page-title header) would stack a 2nd + 3rd "Home Deck".
+        NavigationPage.SetHasNavigationBar(this, false);
+#endif
         _store = store;
         _services = services;
         AskChk.CheckedChanged += (_, _) =>
