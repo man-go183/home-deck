@@ -1,0 +1,12 @@
+[package]
+name = "hdblock"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "hdblock"
+crate-type = ["cdylib"]
+
+# Brave's adblock engine, exact pin. Only bump deliberately (see src/docs/adblock-rust.md).
+[dependencies]
+adblock = "=0.13.6"
