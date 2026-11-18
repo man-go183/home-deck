@@ -270,7 +270,7 @@ public partial class LauncherPage : ContentPage
         {
             WidthRequest = 26, HeightRequest = 26,
             HorizontalOptions = LayoutOptions.End, VerticalOptions = LayoutOptions.End,
-            TranslationX = 1, TranslationY = 1,
+            Margin = new Thickness(0, 0, 10, 10),
             Children = { shield, slash }
         };
         btn.GestureRecognizers.Add(new TapGestureRecognizer
