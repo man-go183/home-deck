@@ -79,4 +79,53 @@ public sealed class AdBlockService
         try { return RustFilterEngine.GetCosmeticCss("https://" + pageHost + "/"); }
         catch { return ""; }
     }
+
+    /// <summary>Element-hide CSS including generic rules for the page's
+    /// classes/ids (from <see cref="ParseClassSnapshot"/>).</summary>
+    public string GetCosmeticCssForClasses(string pageHost, string classesCsv, string idsCsv)
+    {
+        if (!Ready || string.IsNullOrEmpty(pageHost)) return "";
+        try { return RustFilterEngine.GetCosmeticCssForClasses("https://" + pageHost + "/", classesCsv, idsCsv); }
+        catch { return ""; }
+    }
+
+    /// <summary>
+    /// Parse the class/id snapshot JS collected in the page
+    /// (<c>{"c":[...],"i":[...]}</c>, possibly JSON-encoded twice by the
+    /// WebView bridge). Never throws; empty arrays on any failure.
+    /// </summary>
+    public static void ParseClassSnapshot(string? raw, out string[] classes, out string[] ids)
+    {
+        classes = Array.Empty<string>();
+        ids = Array.Empty<string>();
+        try
+        {
+            if (string.IsNullOrEmpty(raw)) return;
+            var inner = raw.Trim();
+            // WebView bridges JSON-encode the string result once more.
+            if (inner.StartsWith("\""))
+            {
+                var s = System.Text.Json.JsonSerializer.Deserialize<string>(inner);
+                if (string.IsNullOrEmpty(s)) return;
+                inner = s;
+            }
+            using var doc = System.Text.Json.JsonDocument.Parse(inner);
+            if (doc.RootElement.TryGetProperty("c", out var c))
+                classes = c.EnumerateArray()
+                    .Select(e => e.GetString() ?? "")
+                    .Where(s => s.Length > 0 && s.Length <= 128)
+                    .Distinct().Take(2000).ToArray();
+            if (doc.RootElement.TryGetProperty("i", out var i))
+                ids = i.EnumerateArray()
+                    .Select(e => e.GetString() ?? "")
+                    .Where(s => s.Length > 0 && s.Length <= 128)
+                    .Distinct().Take(500).ToArray();
+        }
+        catch { }
+    }
+
+    /// <summary>JS snippet collecting the page's classes/ids for generic
+    /// cosmetic matching. Capped (2000 classes, 500 ids).</summary>
+    public const string ClassSnapshotJs =
+        "(function(){try{var s={},o=[];document.querySelectorAll('[class]').forEach(function(e){e.classList.forEach(function(x){if(!s[x]){s[x]=1;o.push(x)}})});var t={},p=[];document.querySelectorAll('[id]').forEach(function(e){if(e.id&&!t[e.id]){t[e.id]=1;p.push(e.id)}});return JSON.stringify({c:o.slice(0,2000),i:p.slice(0,500)})}catch(e){return '{}'}})()";
 }
