@@ -1,4 +1,6 @@
 #if WINDOWS
+using Microsoft.Maui.Controls;
+using Microsoft.Maui.Graphics;
 using Microsoft.Maui.Platform;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
@@ -7,14 +9,17 @@ using Windows.Graphics;
 namespace HomeDeck.Views;
 
 /// <summary>
-/// Windows title-bar integration: the in-page bar row (TitleBar grid) becomes
-/// the OS title-bar content. Drag works everywhere on the bar except the back
-/// button, the pill, and the caption-button reserve on the right.
+/// Windows title-bar integration: the page's back button + profile pill move
+/// INTO the OS caption as a real TitleBar, so the caption row genuinely is our
+/// header (single row — no framework row above, no in-page row below). Drag
+/// works everywhere on the bar except the back button, the pill, and the
+/// caption-button reserve on the right.
 /// If anything here throws, the page simply keeps its normal look.
 /// </summary>
 public partial class BrowserPage
 {
     MauiWinUIWindow? _win;
+    Microsoft.Maui.Controls.TitleBar? _winBar;
 
     partial void SetupCustomTitleBar()
     {
@@ -29,26 +34,46 @@ public partial class BrowserPage
             bar.ButtonInactiveBackgroundColor = transparent;
             bar.ButtonForegroundColor = Windows.UI.Color.FromArgb(255, 242, 237, 232);
             bar.ButtonInactiveForegroundColor = Windows.UI.Color.FromArgb(120, 242, 237, 232);
+            EnsureWindowTitleBar();
             UpdateDragRects();
             win.SizeChanged -= OnWinSizeChanged;
             win.SizeChanged += OnWinSizeChanged;
-            ReplaceDefaultCaptionContent();
         }
         catch { /* keep the normal title bar */ }
     }
 
-    /// <summary>Swap MAUI's default caption content (icon + window title +
-    /// framework back button) for an empty bar. The in-page TitleBar grid is
-    /// the real header and already sits in the caption area; caption buttons
-    /// stay system-drawn and dragging keeps working via our drag rects.
-    /// NOTE: the bar must stay VISIBLE-but-empty — an invisible title bar
-    /// gets no native view and MAUI silently keeps showing its default.</summary>
-    void ReplaceDefaultCaptionContent()
+    /// <summary>Build the real caption content once (back + pill, moved out of
+    /// the in-page grid) and install it as the window's title bar, replacing
+    /// MAUI's default icon + title + framework back. Android is untouched: it
+    /// keeps hiding the grid and moving the same views into its toolbar.</summary>
+    void EnsureWindowTitleBar()
     {
         try
         {
-            if (Window != null)
-                Window.TitleBar = new Microsoft.Maui.Controls.TitleBar();
+            if (Window == null) return;
+            if (_winBar == null)
+            {
+                TitleBar.Children.Remove(BackBtn);
+                TitleBar.Children.Remove(Pill);
+                TitleBar.IsVisible = false;
+                // Collapse the now-empty in-page row so no dead band sits
+                // under the caption (the real bar lives in the title zone).
+                if (TitleBar.Parent is Grid outer && outer.RowDefinitions.Count > 0)
+                    outer.RowDefinitions[0].Height = Microsoft.Maui.Controls.GridLength.Auto;
+                _winBar = new Microsoft.Maui.Controls.TitleBar
+                {
+                    HeightRequest = 40,
+                    BackgroundColor = Color.FromArgb("#241F1A"),
+                    LeadingView = BackBtn,
+                    Content = Pill,
+                    TrailingView = new BoxView
+                    {
+                        WidthRequest = 140,
+                        Color = Colors.Transparent,
+                    },
+                };
+            }
+            Window.TitleBar = _winBar;
         }
         catch { }
     }
@@ -79,13 +104,13 @@ public partial class BrowserPage
     {
         try
         {
-            if (_win == null) return;
-            if (TitleBar.Handler?.PlatformView is not FrameworkElement root) return;
+            if (_win == null || _winBar == null) return;
+            if (_winBar.Handler?.PlatformView is not FrameworkElement root) return;
             double scale = root.XamlRoot?.RasterizationScale ?? 1.0;
             if (scale <= 0) scale = 1.0;
 
             var content = (FrameworkElement)_win.Content;
-            var bar = ToPx(TitleBar, content, scale);
+            var bar = ToPx(_winBar, content, scale);
             if (bar.Width <= 0 || bar.Height <= 0) return;
             var back = ToPx(BackBtn, content, scale);
             var pill = ToPx(Pill, content, scale);
