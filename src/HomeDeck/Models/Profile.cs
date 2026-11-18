@@ -11,6 +11,12 @@ public sealed class Profile
     /// <summary>Per-profile ad &amp; tracker blocking (Brave-style lists).</summary>
     public bool AdBlock { get; set; } = true;
 
+    /// <summary>Avatar source: "default" (person glyph on color),
+    /// "gradient" (preset index in <see cref="AvatarValue"/>), or
+    /// "file" (image filename under AppData/avatars/). Unknown = default.</summary>
+    public string AvatarKind { get; set; } = "default";
+    public string AvatarValue { get; set; } = "";
+
     public string PageId
     {
         get
