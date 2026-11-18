@@ -32,6 +32,9 @@ sealed class RustFilterEngine : AdBlockService.IFilterEngine
     [DllImport(Lib, EntryPoint = "hdblock_cosmetic_css", CallingConvention = CallingConvention.Cdecl)]
     static extern IntPtr CosmeticCssNative(IntPtr handle, byte[] url, int len);
 
+    [DllImport(Lib, EntryPoint = "hdblock_cosmetic_css_for_classes", CallingConvention = CallingConvention.Cdecl)]
+    static extern IntPtr CosmeticCssForClassesNative(IntPtr handle, byte[] url, int urlLen, byte[] classes, int classesLen, byte[] ids, int idsLen);
+
     [DllImport(Lib, EntryPoint = "hdblock_free_string", CallingConvention = CallingConvention.Cdecl)]
     static extern void FreeString(IntPtr s);
 
@@ -90,6 +93,25 @@ sealed class RustFilterEngine : AdBlockService.IFilterEngine
             if (!s_ready || s_handle == IntPtr.Zero) return "";
             var b = Encoding.UTF8.GetBytes(pageUrl);
             var p = CosmeticCssNative(s_handle, b, b.Length);
+            if (p == IntPtr.Zero) return "";
+            var s = Marshal.PtrToStringUTF8(p) ?? "";
+            FreeString(p);
+            return s;
+        }
+        catch { return ""; }
+    }
+
+    /// <summary>Element-hide CSS including generic rules matching the page's
+    /// classes/ids (comma-separated). Never throws.</summary>
+    public static string GetCosmeticCssForClasses(string pageUrl, string classesCsv, string idsCsv)
+    {
+        try
+        {
+            if (!s_ready || s_handle == IntPtr.Zero) return "";
+            var ub = Encoding.UTF8.GetBytes(pageUrl);
+            var cb = Encoding.UTF8.GetBytes(classesCsv ?? "");
+            var ib = Encoding.UTF8.GetBytes(idsCsv ?? "");
+            var p = CosmeticCssForClassesNative(s_handle, ub, ub.Length, cb, cb.Length, ib, ib.Length);
             if (p == IntPtr.Zero) return "";
             var s = Marshal.PtrToStringUTF8(p) ?? "";
             FreeString(p);
