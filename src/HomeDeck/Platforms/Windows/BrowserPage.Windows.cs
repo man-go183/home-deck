@@ -40,13 +40,15 @@ public partial class BrowserPage
     /// <summary>Swap MAUI's default caption content (icon + window title +
     /// framework back button) for an empty bar. The in-page TitleBar grid is
     /// the real header and already sits in the caption area; caption buttons
-    /// stay system-drawn and dragging keeps working via our drag rects.</summary>
+    /// stay system-drawn and dragging keeps working via our drag rects.
+    /// NOTE: the bar must stay VISIBLE-but-empty — an invisible title bar
+    /// gets no native view and MAUI silently keeps showing its default.</summary>
     void ReplaceDefaultCaptionContent()
     {
         try
         {
             if (Window != null)
-                Window.TitleBar = new Microsoft.Maui.Controls.TitleBar { IsVisible = false };
+                Window.TitleBar = new Microsoft.Maui.Controls.TitleBar();
         }
         catch { }
     }
@@ -58,13 +60,14 @@ public partial class BrowserPage
             if (_win != null)
             {
                 _win.SizeChanged -= OnWinSizeChanged;
-                _win.AppWindow.TitleBar.ExtendsContentIntoTitleBar = false;
                 _win = null;
             }
-            // Hand the caption back to the framework default (icon + title)
-            // for the launcher.
+            // Stay extended and keep an empty caption: the launcher sets its
+            // own empty title bar on appearing. Never restore the framework
+            // default here — that is what painted the extra strip + white
+            // caption when navigating back.
             if (Window != null)
-                Window.TitleBar = null;
+                Window.TitleBar = new Microsoft.Maui.Controls.TitleBar();
         }
         catch { }
     }

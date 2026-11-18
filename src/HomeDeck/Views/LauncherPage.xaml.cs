@@ -37,6 +37,13 @@ public partial class LauncherPage : ContentPage
     {
         base.OnAppearing();
         try { Window.Title = "Home Deck"; } catch { }
+#if WINDOWS
+        // Caption buttons only: MAUI already extends content into the caption
+        // by default, so an empty title bar leaves just the system buttons.
+        // (Must stay visible-but-empty — an invisible bar gets no native view
+        // and MAUI falls back to its default icon + title row.)
+        try { Window.TitleBar = new Microsoft.Maui.Controls.TitleBar(); } catch { }
+#endif
         await _store.LoadAsync();
         AskChk.IsChecked = _store.Prefs.AskEveryTime;
         BuildCards();
