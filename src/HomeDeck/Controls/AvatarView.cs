@@ -68,7 +68,7 @@ public static class AvatarView
         {
             if (p.AvatarKind == "file" && !string.IsNullOrEmpty(p.AvatarValue))
             {
-                var path = Path.Combine(FileSystem.AppDataDirectory, "avatars", p.AvatarValue);
+                var path = System.IO.Path.Combine(FileSystem.AppDataDirectory, "avatars", p.AvatarValue);
                 if (File.Exists(path))
                 {
                     var img = new Image
@@ -92,7 +92,7 @@ public static class AvatarView
             else
                 bg.Fill = new SolidColorBrush(SafeColor(p.ColorHex));
             g.Children.Add(bg);
-            g.Children.Add(new Path
+            g.Children.Add(new Microsoft.Maui.Controls.Shapes.Path
             {
                 Data = PersonGeometry,
                 Fill = new SolidColorBrush(GlyphColor),

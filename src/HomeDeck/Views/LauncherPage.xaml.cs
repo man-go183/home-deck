@@ -207,7 +207,7 @@ public partial class LauncherPage : ContentPage
 
     static View MakePenButton(Action onTap)
     {
-        var path = new Path
+        var path = new Microsoft.Maui.Controls.Shapes.Path
         {
             Data = (Geometry)new PathGeometryConverter().ConvertFromInvariantString(
                 "M4 20l1.2-4.2L16.7 4.3a2.1 2.1 0 0 1 3 3L8.2 18.8z M14.7 6.3l3 3"),
@@ -236,14 +236,14 @@ public partial class LauncherPage : ContentPage
     View MakeShieldButton(Profile p, Action? refreshed)
     {
         var gold = (Color)Application.Current!.Resources["HdGold"];
-        var shield = new Path
+        var shield = new Microsoft.Maui.Controls.Shapes.Path
         {
             Data = (Geometry)new PathGeometryConverter().ConvertFromInvariantString(AvatarView.ShieldData),
             Aspect = Stretch.Uniform, WidthRequest = 17, HeightRequest = 17,
             HorizontalOptions = LayoutOptions.Center, VerticalOptions = LayoutOptions.Center,
             InputTransparent = true
         };
-        var slash = new Path
+        var slash = new Microsoft.Maui.Controls.Shapes.Path
         {
             Data = (Geometry)new PathGeometryConverter().ConvertFromInvariantString(AvatarView.SlashData),
             Aspect = Stretch.Uniform, WidthRequest = 17, HeightRequest = 17,
@@ -490,9 +490,9 @@ public partial class LauncherPage : ContentPage
         {
             var photo = await MediaPicker.Default.PickPhotoAsync();
             if (photo == null) return;
-            var dir = Path.Combine(FileSystem.AppDataDirectory, "avatars");
+            var dir = System.IO.Path.Combine(FileSystem.AppDataDirectory, "avatars");
             Directory.CreateDirectory(dir);
-            var dest = Path.Combine(dir, p.Id + ".jpg");
+            var dest = System.IO.Path.Combine(dir, p.Id + ".jpg");
             using var src = await photo.OpenReadAsync();
             using var dst = File.Create(dest);
             await src.CopyToAsync(dst);
@@ -511,7 +511,7 @@ public partial class LauncherPage : ContentPage
         if (p == null) return;
         try
         {
-            var path = Path.Combine(FileSystem.AppDataDirectory, "avatars", p.AvatarValue);
+            var path = System.IO.Path.Combine(FileSystem.AppDataDirectory, "avatars", p.AvatarValue);
             if (File.Exists(path)) File.Delete(path);
         }
         catch { }
