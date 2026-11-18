@@ -10,6 +10,9 @@ public partial class BrowserPage : ContentPage
     readonly ProfileStore _store;
     readonly AdBlockService _ads;
     Profile? _profile;
+#if ANDROID
+    bool _titleViewSet;
+#endif
 
     public BrowserPage(ProfileStore store, AdBlockService ads)
     {
@@ -33,6 +36,39 @@ public partial class BrowserPage : ContentPage
         };
     }
 
+    protected override void OnAppearing()
+    {
+        base.OnAppearing();
+#if ANDROID
+        if (!_titleViewSet)
+        {
+            _titleViewSet = true;
+            // The in-page bar is hidden; back + pill move into the native toolbar.
+            TitleBar.IsVisible = false;
+            var root = new HorizontalStackLayout
+            {
+                Spacing = 8,
+                VerticalOptions = LayoutOptions.Center,
+                Children = { BackBtn, Pill }
+            };
+            NavigationPage.SetHasBackButton(this, false);
+            NavigationPage.SetTitleView(this, root);
+        }
+#endif
+        SetupCustomTitleBar();
+    }
+
+    protected override void OnDisappearing()
+    {
+        base.OnDisappearing();
+        ResetTitleBar();
+    }
+
+    // Implemented in Platforms/Windows/BrowserPage.Windows.cs. On other
+    // platforms these declarations vanish at compile time (no-op).
+    partial void SetupCustomTitleBar();
+    partial void ResetTitleBar();
+
     public void BindProfile(Profile p)
     {
         _profile = p;
@@ -50,6 +86,8 @@ public partial class BrowserPage : ContentPage
         try { Web.PageHost = new Uri(p.Url).Host; } catch { Web.PageHost = ""; }
         Web.Source = new UrlWebViewSource { Url = p.Url };
         Splash.IsVisible = true;
+
+        try { Window.Title = $"{p.Name} – Home Deck"; } catch { }
 
         _store.Prefs.LastProfileId = p.Id;
         _store.SavePrefs();
@@ -120,18 +158,21 @@ public partial class BrowserPage : ContentPage
                 Command = new Command(() => cb.IsChecked = !cb.IsChecked)
             });
             DropList.Children.Add(row);
-        }
-    }
 
-    async void OnMenu(object? sender, EventArgs e)
-    {
-        var choice = await DisplayActionSheetAsync("Home Deck", "Cancel", null,
-            "Switch profile", "Open in browser", "Manage profiles");
-        if (choice == "Switch profile") { RebuildDrop(); Drop.IsVisible = true; }
-        else if (choice == "Open in browser" && _profile != null)
-        {
-            try { await Launcher.OpenAsync(_profile.Url); } catch { }
+            var open = new Button
+            {
+                Text = "Open in browser", BackgroundColor = Colors.Transparent,
+                TextColor = Colors.White, HorizontalOptions = LayoutOptions.Fill
+            };
+            open.Clicked += async (_, _) =>
+            {
+                Drop.IsVisible = false;
+                if (_profile != null)
+                {
+                    try { await Launcher.OpenAsync(_profile.Url); } catch { }
+                }
+            };
+            DropList.Children.Add(open);
         }
-        else if (choice == "Manage profiles") await Navigation.PopAsync();
     }
 }
