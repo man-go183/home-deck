@@ -15,9 +15,9 @@
 use adblock::engine::Engine;
 use adblock::request::Request;
 
-use std::ffi::CString;
+use std::ffi::{CStr, CString};
 use std::os::raw::{c_char, c_int};
-use std::panic;
+use std::panic::{self, AssertUnwindSafe};
 use std::ptr;
 use std::slice;
 
@@ -52,7 +52,7 @@ pub extern "C" fn hdblock_version() -> c_int {
 /// Create an empty engine. Returns null on failure. Free with `hdblock_destroy`.
 #[no_mangle]
 pub extern "C" fn hdblock_create() -> *mut Engine {
-    match panic::catch_unwind(|| Box::new(Engine::new_with_list_text(String::new()))) {
+    match panic::catch_unwind(AssertUnwindSafe(|| Box::new(Engine::new_with_list_text(String::new())))) {
         Ok(b) => Box::into_raw(b),
         Err(_) => ptr::null_mut(),
     }
@@ -69,14 +69,14 @@ pub extern "C" fn hdblock_load_rules(
     if handle.is_null() {
         return 0;
     }
-    let result = panic::catch_unwind(|| {
+    let result = panic::catch_unwind(AssertUnwindSafe(|| {
         let text = read_str(rules_ptr, rules_len).ok_or(())?;
         let engine = Engine::new_with_list_text(text);
         unsafe {
             *handle = engine;
         }
         Ok::<(), ()>(())
-    });
+    }));
     match result {
         Ok(Ok(())) => 1,
         _ => 0,
@@ -94,7 +94,7 @@ pub extern "C" fn hdblock_should_block(
     page_len: usize,
     req_type: c_int,
 ) -> c_int {
-    let result = panic::catch_unwind(|| {
+    let result = panic::catch_unwind(AssertUnwindSafe(|| {
         let engine = unsafe { handle.as_ref() }.ok_or(())?;
         let url = read_str(url_ptr, url_len).ok_or(())?;
         let host = read_str(page_ptr, page_len).unwrap_or_default();
@@ -105,7 +105,7 @@ pub extern "C" fn hdblock_should_block(
         };
         let req = Request::new(&url, &source, request_type_name(req_type), "").map_err(|_| ())?;
         Ok::<bool, ()>(engine.check_network_request(&req).should_block())
-    });
+    }));
     match result {
         Ok(Ok(true)) => 1,
         _ => 0,
@@ -121,7 +121,7 @@ pub extern "C" fn hdblock_cosmetic_css(
     url_ptr: *const c_char,
     url_len: usize,
 ) -> *mut c_char {
-    let result = panic::catch_unwind(|| {
+    let result = panic::catch_unwind(AssertUnwindSafe(|| {
         let engine = unsafe { handle.as_ref() }.ok_or(())?;
         let url = read_str(url_ptr, url_len).ok_or(())?;
         let res = engine.url_cosmetic_resources(&url);
@@ -131,7 +131,7 @@ pub extern "C" fn hdblock_cosmetic_css(
         let mut sels: Vec<&str> = res.hide_selectors.iter().map(|s| s.as_str()).collect();
         sels.sort_unstable();
         Ok::<String, ()>(format!("{}{{display:none!important}}", sels.join(",")))
-    });
+    }));
     match result {
         Ok(Ok(css)) => match CString::new(css) {
             Ok(c) => c.into_raw(),
