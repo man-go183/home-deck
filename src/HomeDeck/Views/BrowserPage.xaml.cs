@@ -1,3 +1,4 @@
+using HomeDeck.Controls;
 using HomeDeck.Models;
 using HomeDeck.Services;
 using Microsoft.Maui.ApplicationModel;
@@ -74,13 +75,12 @@ public partial class BrowserPage : ContentPage
         _profile = p;
         Drop.IsVisible = false;
         PillName.Text = p.Name;
-        PillGlyph.Text = Glyph(p);
+        PillAvaBox.Children.Clear();
+        PillAvaBox.Children.Add(AvatarView.Build(p, 26));
+        SplashAvaBox.Children.Clear();
+        SplashAvaBox.Children.Add(AvatarView.Build(p, 76));
         SplashName.Text = p.Name;
-        SplashGlyph.Text = Glyph(p);
-        var color = Color.FromArgb(p.ColorHex);
-        ((SolidColorBrush)PillAva.Fill!).Color = color;
-        ((SolidColorBrush)SplashAva.Fill!).Color = color;
-        PillShield.IsVisible = p.AdBlock;
+        SyncShield(p);
 
         Web.AdBlockEnabled = p.AdBlock;
         try { Web.PageHost = new Uri(p.Url).Host; } catch { Web.PageHost = ""; }
@@ -92,6 +92,12 @@ public partial class BrowserPage : ContentPage
         _store.Prefs.LastProfileId = p.Id;
         _store.SavePrefs();
         _ = _ads.EnsureLoadedAsync();
+    }
+
+    void SyncShield(Profile p)
+    {
+        PillShield.IsVisible = p.AdBlock;
+        PillSlash.IsVisible = !p.AdBlock;
     }
 
     static string Glyph(Profile p)
@@ -149,7 +155,7 @@ public partial class BrowserPage : ContentPage
                 if (_profile == null) return;
                 _profile.AdBlock = e.Value;
                 Web.AdBlockEnabled = e.Value;
-                PillShield.IsVisible = e.Value;
+                SyncShield(_profile);
                 _store.SaveProfiles();
             };
             row.Children.Add(cb); row.Children.Add(lab);
