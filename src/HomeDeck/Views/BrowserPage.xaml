@@ -17,15 +17,17 @@
       <HorizontalStackLayout x:Name="Pill" Grid.Column="1" Spacing="8"
                              VerticalOptions="Center" HorizontalOptions="Center">
         <Grid WidthRequest="26" HeightRequest="26" VerticalOptions="Center">
-          <Ellipse x:Name="PillAva" Fill="#B3402E" />
-          <Label x:Name="PillGlyph" FontSize="12" FontAttributes="Bold"
-                 TextColor="White" HorizontalOptions="Center"
-                 VerticalOptions="Center" />
-          <Path x:Name="PillShield" WidthRequest="12" HeightRequest="14"
-                Aspect="None" TranslationX="1" TranslationY="1"
-                Data="M6 0 L11 2.5 V7 C11 10.5 8.7 12.3 6 13.5 C3.3 12.3 1 10.5 1 7 V2.5 Z"
+          <Grid x:Name="PillAvaBox" WidthRequest="26" HeightRequest="26" />
+          <Path x:Name="PillShield" WidthRequest="13" HeightRequest="13"
+                Aspect="Uniform" TranslationX="1" TranslationY="1"
+                Data="M12 3l7 2.8v5.1c0 4.6-3 7.9-7 9.6-4-1.7-7-5-7-9.6V5.8z"
                 Fill="{StaticResource HdGold}"
-                Stroke="{StaticResource HdGoldDeep}" StrokeThickness="1"
+                Stroke="{StaticResource HdGoldDeep}" StrokeThickness="1.5"
+                HorizontalOptions="End" VerticalOptions="End" />
+          <Path x:Name="PillSlash" WidthRequest="13" HeightRequest="13"
+                Aspect="Uniform" TranslationX="1" TranslationY="1"
+                Data="M5 5l14 14" Stroke="{StaticResource HdDim}"
+                StrokeThickness="2" IsVisible="false"
                 HorizontalOptions="End" VerticalOptions="End" />
         </Grid>
         <Label x:Name="PillName" FontSize="14" FontAttributes="Bold"
@@ -46,12 +48,8 @@
       <Grid x:Name="Splash" BackgroundColor="{StaticResource HdBg}"
             VerticalOptions="FillAndExpand" HorizontalOptions="FillAndExpand">
         <VerticalStackLayout VerticalOptions="Center" Spacing="12">
-          <Grid WidthRequest="76" HeightRequest="76" HorizontalOptions="Center">
-            <Ellipse x:Name="SplashAva" Fill="#B3402E" />
-            <Label x:Name="SplashGlyph" FontSize="30" FontAttributes="Bold"
-                   TextColor="White" HorizontalOptions="Center"
-                   VerticalOptions="Center" />
-          </Grid>
+          <Grid WidthRequest="76" HeightRequest="76" HorizontalOptions="Center"
+                x:Name="SplashAvaBox" />
           <Label x:Name="SplashName" FontSize="17" FontAttributes="Bold"
                  TextColor="{StaticResource HdText}"
                  HorizontalOptions="Center" />
