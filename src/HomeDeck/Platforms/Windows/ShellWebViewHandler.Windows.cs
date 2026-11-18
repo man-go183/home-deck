@@ -1,6 +1,7 @@
-using HomeDeck.Controls;
 using System.Runtime.InteropServices.WindowsRuntime;
+using System.Text.Json;
 using HomeDeck;
+using HomeDeck.Controls;
 using HomeDeck.Services;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Maui.ApplicationModel;
@@ -40,7 +41,7 @@ public partial class ShellWebViewHandler
                     if (!view.AdBlockEnabled || _ads == null) return;
                     var url = e.Request.Uri;
                     if (string.IsNullOrEmpty(url)) return;
-                    if (_ads.ShouldBlock(url, view.PageHost, GuessType(url)))
+                    if (_ads.ShouldBlock(url, view.PageHost, GuessType(url, e.Request.Headers)))
                     {
                         var env = (s as Microsoft.Web.WebView2.Core.CoreWebView2)?.Environment;
                         if (env != null)
@@ -57,18 +58,34 @@ public partial class ShellWebViewHandler
             core.NavigationCompleted += async (_, _) =>
             {
                 try { await wv.ExecuteScriptAsync(js); } catch { }
+                try
+                {
+                    var css = _ads?.GetCosmeticCssForHost(view.PageHost) ?? "";
+                    if (!string.IsNullOrEmpty(css))
+                        await wv.ExecuteScriptAsync("var s=document.createElement('style');s.textContent=" + JsonSerializer.Serialize(css) + ";document.documentElement.appendChild(s);");
+                }
+                catch { }
             };
         }
         catch { /* WebView2 missing: page area stays blank, shell still runs */ }
     }
 
-    static string GuessType(string url)
+    static string GuessType(string url, Microsoft.Web.WebView2.Core.CoreWebView2HttpRequestHeaders? headers)
     {
+        try
+        {
+            if (headers != null && headers.Contains("X-Requested-With")) return "xmlhttprequest";
+        }
+        catch { }
         var u = url.ToLowerInvariant();
         if (u.Contains(".js")) return "script";
         if (u.Contains(".css")) return "stylesheet";
         foreach (var ext in new[] { ".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg" })
             if (u.Contains(ext)) return "image";
+        foreach (var ext in new[] { ".woff", ".woff2", ".ttf", ".otf" })
+            if (u.Contains(ext)) return "font";
+        foreach (var ext in new[] { ".mp4", ".mp3", ".webm", ".ogg", ".m4a" })
+            if (u.Contains(ext)) return "media";
         return "other";
     }
 }
