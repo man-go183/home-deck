@@ -48,9 +48,10 @@ CHANGED:
 - Resource-type mapping extended from extension-guessing to the engine's
   request types (script, image, stylesheet, fetch/xhr, subdocument, font,
   media, websocket, other; main-frame/document never blocked).
-- Cosmetic filtering added: on navigation complete, query the engine for the
-  page host's element-hide rules and inject them (extends the existing
-  `shell.js` bootstrap, which is already injected on every navigation).
+- Cosmetic filtering: on navigation, the handlers inject URL-specific CSS,
+  then collect the page's classes/ids via JS and inject a second stylesheet
+  for matching generic `##` rules (via `hdblock_cosmetic_css_for_classes`).
+  Generic rules are resolved against real page classes — never assumed.
 
 ## 3. Native wrapper (`src/native/hdblock/` — new, committed, rebuildable)
 
