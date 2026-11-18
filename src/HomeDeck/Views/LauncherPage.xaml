@@ -17,7 +17,9 @@
                     AlignItems="Center">
         </FlexLayout>
         <HorizontalStackLayout Spacing="8" HorizontalOptions="Center" Margin="0,8,0,0">
-          <CheckBox x:Name="AskChk" Color="{StaticResource HdGold}" />
+          <CheckBox x:Name="AskChk" Color="{StaticResource HdGold}"
+                    WidthRequest="20" HeightRequest="20"
+                    VerticalOptions="Center" />
           <Label Text="Ask every time" TextColor="{StaticResource HdDim}"
                  FontSize="13" VerticalOptions="Center">
             <Label.GestureRecognizers>
@@ -25,14 +27,17 @@
             </Label.GestureRecognizers>
           </Label>
         </HorizontalStackLayout>
-        <HorizontalStackLayout Spacing="8" HorizontalOptions="Center" Margin="0,18,0,0">
-          <Label Text="v0.1" FontSize="11" TextColor="{StaticResource HdDim}"
-                 VerticalOptions="Center" />
-          <Button Text="?" WidthRequest="26" HeightRequest="26" CornerRadius="13"
+        <Grid ColumnDefinitions="*,Auto,*" Margin="0,18,0,0"
+              MaximumWidthRequest="760" HorizontalOptions="Fill">
+          <Label Text="v0.1" Grid.Column="1" FontSize="11"
+                 TextColor="{StaticResource HdDim}"
+                 HorizontalOptions="Center" VerticalOptions="Center" />
+          <Button Text="?" Grid.Column="2" WidthRequest="26" HeightRequest="26"
+                  CornerRadius="13" HorizontalOptions="End"
                   FontSize="12" Padding="0" TextColor="{StaticResource HdText}"
                   BackgroundColor="Transparent" BorderColor="#55504A" BorderWidth="1"
                   Clicked="OnHelp" />
-        </HorizontalStackLayout>
+        </Grid>
       </VerticalStackLayout>
     </ScrollView>
 
