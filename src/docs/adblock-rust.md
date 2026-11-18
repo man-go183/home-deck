@@ -55,17 +55,19 @@ CHANGED:
 ## 3. Native wrapper (`src/native/hdblock/` — new, committed, rebuildable)
 
 A tiny Rust crate (not the engine itself — it *depends on* `adblock 0.13.6`)
-exposing a C ABI the C# side P/Invokes. Minimal surface:
+exposing a C ABI the C# side P/Invokes. Implemented surface
+(`src/native/hdblock/src/lib.rs`, ABI version 1 — the C# side refuses any
+other version):
 
-- `hdblock_new() -> handle` — create an empty engine.
-- `hdblock_add_rules(handle, rules_ptr, rules_len)` — feed concatenated
-  filter-list text (UTF-8). Returns count of parsed rules (for logging).
-- `hdblock_should_block(handle, url, host, third_party, req_type) -> int`
-  — 1 = block, 0 = allow. `req_type` is a small int enum mirroring the
-  engine's request types.
-- `hdblock_cosmetic_css(handle, host) -> char*` — newline-joined element-hide
-  CSS for the host (caller frees via `hdblock_free_string`).
-- `hdblock_destroy(handle)`.
+- `hdblock_version() -> int` — ABI contract guard.
+- `hdblock_create() -> handle` — empty engine (null on failure).
+- `hdblock_load_rules(handle, utf8_ptr, len) -> int` — parse concatenated
+  list text, swap into the engine (1 = ok).
+- `hdblock_should_block(handle, url, url_len, page_host, host_len, type) -> int`
+  — 1 = block, 0 = allow. Page host `""` counts as third-party.
+- `hdblock_cosmetic_css(handle, url, len) -> char*` — newline-free
+  element-hide CSS for the URL, null when nothing to hide (caller frees).
+- `hdblock_free_string(s)`, `hdblock_destroy(handle)` — null-safe.
 
 Threading: matching happens on WebView threads. The wrapper guards the
 engine handle with a mutex (matching is microseconds; contention is nil).
