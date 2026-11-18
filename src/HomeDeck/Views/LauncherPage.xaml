@@ -4,34 +4,128 @@
              x:Class="HomeDeck.Views.LauncherPage"
              Title="Home Deck"
              BackgroundColor="{StaticResource HdBg}">
-  <ScrollView>
-    <VerticalStackLayout Padding="24,48,24,24" Spacing="10"
-                         VerticalOptions="CenterAndExpand">
-      <Label Text="HOME DECK" FontSize="11" TextColor="{StaticResource HdDim}"
-             HorizontalOptions="Center" />
-      <Label Text="Choose a profile" FontSize="24" FontAttributes="Bold"
-             TextColor="{StaticResource HdText}" HorizontalOptions="Center"
-             Margin="0,0,0,18" />
-      <FlexLayout x:Name="CardRow" Wrap="Wrap" JustifyContent="Center"
-                  AlignItems="Center">
-      </FlexLayout>
-      <HorizontalStackLayout Spacing="8" HorizontalOptions="Center" Margin="0,8,0,0">
-        <CheckBox x:Name="AskChk" Color="{StaticResource HdGold}" />
-        <Label Text="Ask every time" TextColor="{StaticResource HdDim}"
-               FontSize="13" VerticalOptions="Center">
-          <Label.GestureRecognizers>
-            <TapGestureRecognizer Tapped="OnAskTap" />
-          </Label.GestureRecognizers>
-        </Label>
-      </HorizontalStackLayout>
-      <HorizontalStackLayout Spacing="8" HorizontalOptions="Center" Margin="0,18,0,0">
-        <Label Text="v0.1.0" FontSize="11" TextColor="{StaticResource HdDim}"
-               VerticalOptions="Center" />
-        <Button Text="?" WidthRequest="26" HeightRequest="26" CornerRadius="13"
-                FontSize="12" Padding="0" TextColor="{StaticResource HdText}"
-                BackgroundColor="Transparent" BorderColor="#55504A" BorderWidth="1"
-                Clicked="OnHelp" />
-      </HorizontalStackLayout>
-    </VerticalStackLayout>
-  </ScrollView>
+  <Grid>
+    <ScrollView>
+      <VerticalStackLayout Padding="24,48,24,24" Spacing="10"
+                          VerticalOptions="CenterAndExpand">
+        <Label Text="HOME DECK" FontSize="11" TextColor="{StaticResource HdDim}"
+               HorizontalOptions="Center" />
+        <Label Text="Choose a profile" FontSize="24" FontAttributes="Bold"
+               TextColor="{StaticResource HdText}" HorizontalOptions="Center"
+               Margin="0,0,0,18" />
+        <FlexLayout x:Name="CardRow" Wrap="Wrap" JustifyContent="Center"
+                    AlignItems="Center">
+        </FlexLayout>
+        <HorizontalStackLayout Spacing="8" HorizontalOptions="Center" Margin="0,8,0,0">
+          <CheckBox x:Name="AskChk" Color="{StaticResource HdGold}" />
+          <Label Text="Ask every time" TextColor="{StaticResource HdDim}"
+                 FontSize="13" VerticalOptions="Center">
+            <Label.GestureRecognizers>
+              <TapGestureRecognizer Tapped="OnAskTap" />
+            </Label.GestureRecognizers>
+          </Label>
+        </HorizontalStackLayout>
+        <HorizontalStackLayout Spacing="8" HorizontalOptions="Center" Margin="0,18,0,0">
+          <Label Text="v0.1" FontSize="11" TextColor="{StaticResource HdDim}"
+                 VerticalOptions="Center" />
+          <Button Text="?" WidthRequest="26" HeightRequest="26" CornerRadius="13"
+                  FontSize="12" Padding="0" TextColor="{StaticResource HdText}"
+                  BackgroundColor="Transparent" BorderColor="#55504A" BorderWidth="1"
+                  Clicked="OnHelp" />
+        </HorizontalStackLayout>
+      </VerticalStackLayout>
+    </ScrollView>
+
+    <!-- avatar popup -->
+    <BoxView x:Name="AvaDim" IsVisible="false" Color="#80000000">
+      <BoxView.GestureRecognizers>
+        <TapGestureRecognizer Tapped="OnAvaDoneTap" />
+      </BoxView.GestureRecognizers>
+    </BoxView>
+    <Border x:Name="AvaPop" IsVisible="false"
+            BackgroundColor="#1E1A16" Stroke="#3A342D"
+            HorizontalOptions="Center" VerticalOptions="Center"
+            Padding="16" MinimumWidthRequest="240">
+      <Border.StrokeShape>
+        <RoundRectangle CornerRadius="14" />
+      </Border.StrokeShape>
+      <VerticalStackLayout Spacing="10">
+        <Label Text="Avatar" FontSize="16" FontAttributes="Bold"
+               TextColor="{StaticResource HdText}" HorizontalOptions="Center" />
+        <Grid x:Name="AvaPreviewBox" WidthRequest="64" HeightRequest="64"
+              HorizontalOptions="Center" />
+        <Button Text="Upload image" Clicked="OnAvaUpload"
+                BackgroundColor="Transparent" TextColor="{StaticResource HdGold}"
+                BorderColor="{StaticResource HdGold}" BorderWidth="1" CornerRadius="10" />
+        <FlexLayout x:Name="AvaDots" Wrap="Wrap" JustifyContent="Center" />
+        <Button x:Name="AvaRemove" Text="Remove photo" Clicked="OnAvaRemove"
+                BackgroundColor="Transparent" TextColor="#E14B32" />
+        <Button Text="Done" Clicked="OnAvaDoneBtn"
+                BackgroundColor="{StaticResource HdGold}" TextColor="#161311"
+                CornerRadius="10" />
+      </VerticalStackLayout>
+    </Border>
+
+    <!-- help card -->
+    <BoxView x:Name="HelpDim" IsVisible="false" Color="#80000000">
+      <BoxView.GestureRecognizers>
+        <TapGestureRecognizer Tapped="OnHelpClose" />
+      </BoxView.GestureRecognizers>
+    </BoxView>
+    <Border x:Name="HelpCard" IsVisible="false"
+            BackgroundColor="#1E1A16" Stroke="#3A342D"
+            HorizontalOptions="Center" VerticalOptions="Center"
+            Padding="18" MaximumWidthRequest="420" MaximumHeightRequest="520">
+      <Border.StrokeShape>
+        <RoundRectangle CornerRadius="14" />
+      </Border.StrokeShape>
+      <ScrollView>
+        <VerticalStackLayout Spacing="8">
+          <Label Text="Using Home Deck" FontSize="18" FontAttributes="Bold"
+                 TextColor="{StaticResource HdText}" />
+          <Label TextColor="{StaticResource HdText}" FontSize="13">
+            <Label.FormattedText>
+              <FormattedString>
+                <Span Text="1. Choose a profile to open its page in the app.&#10;" />
+                <Span Text="2. Tap the pen on a card to rename it, set its Perchance page link, or change the avatar.&#10;" />
+                <Span Text="3. Tap New profile to add one.&#10;" />
+                <Span Text="4. In the app, tap your profile in the header to switch without going back.&#10;" />
+                <Span Text="5. Uncheck Ask every time to reopen your last profile on launch.&#10;" />
+                <Span Text="6. The shield on a card means ad &amp; tracker blocking is on — tap it to toggle." />
+              </FormattedString>
+            </Label.FormattedText>
+          </Label>
+          <Label x:Name="AdvHead" Text="Advanced: device features a page can request ›"
+                 TextColor="{StaticResource HdGold}" FontSize="13">
+            <Label.GestureRecognizers>
+              <TapGestureRecognizer Tapped="OnAdvTap" />
+            </Label.GestureRecognizers>
+          </Label>
+          <Label x:Name="AdvList" IsVisible="false" TextColor="{StaticResource HdDim}" FontSize="12">
+            <Label.FormattedText>
+              <FormattedString>
+                <Span Text="Battery — level, charging state&#10;" />
+                <Span Text="Bluetooth LE — scan, connect, read/write&#10;" />
+                <Span Text="Location — GPS position (asks first)&#10;" />
+                <Span Text="Camera &amp; microphone — capture, calls (asks first)&#10;" />
+                <Span Text="Files — open, save, private app storage&#10;" />
+                <Span Text="Notifications — local + scheduled (asks first)&#10;" />
+                <Span Text="Vibration — haptics patterns&#10;" />
+                <Span Text="Network — online status, connection type&#10;" />
+                <Span Text="Sensors — accelerometer, gyroscope, compass&#10;" />
+                <Span Text="Device — model, OS, screen state, keep-awake&#10;" />
+                <Span Text="Brightness — screen level while the page is open (restores after)&#10;" />
+                <Span Text="Clipboard — read/write text&#10;" />
+                <Span Text="Share — system share sheet&#10;&#10;" />
+                <Span Text="Sensitive features ask your permission first, per profile. A page only ever gets what you allow." />
+              </FormattedString>
+            </Label.FormattedText>
+          </Label>
+          <Button Text="Got it" Clicked="OnHelpClose"
+                  BackgroundColor="{StaticResource HdGold}" TextColor="#161311"
+                  CornerRadius="10" />
+        </VerticalStackLayout>
+      </ScrollView>
+    </Border>
+  </Grid>
 </ContentPage>
