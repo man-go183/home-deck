@@ -313,13 +313,13 @@ public partial class BrowserPage : ContentPage
         if (_profile != null)
         {
             var row = new HorizontalStackLayout { Spacing = 10, Padding = new Thickness(10, 8) };
-            var cb = new CheckBox { IsChecked = _profile.AdBlock, Color = (Color)Application.Current!.Resources["HdGold"] };
+            var cb = new HdCheckBox { IsChecked = _profile.AdBlock, VerticalOptions = LayoutOptions.Center };
             var lab = new Label { Text = "Block ads & trackers", TextColor = Colors.White, VerticalOptions = LayoutOptions.Center };
-            cb.CheckedChanged += (_, e) =>
+            cb.CheckedChanged += (_, on) =>
             {
                 if (_profile == null) return;
-                _profile.AdBlock = e.Value;
-                Web.AdBlockEnabled = e.Value;
+                _profile.AdBlock = on;
+                Web.AdBlockEnabled = on;
                 SyncShield(_profile);
                 _store.SaveProfiles();
             };
@@ -331,7 +331,7 @@ public partial class BrowserPage : ContentPage
             DropList.Children.Add(row);
             DropList.Children.Add(MenuDivider());
 
-            DropList.Children.Add(MenuButton("Open in browser ↗", async () =>
+            DropList.Children.Add(MenuButton("↗  Open in browser", async () =>
             {
                 Drop.IsVisible = false;
                 if (_profile != null)
