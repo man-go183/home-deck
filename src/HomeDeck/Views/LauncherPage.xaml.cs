@@ -158,7 +158,6 @@ public partial class LauncherPage : ContentPage
         var edit = new VerticalStackLayout
         {
             Spacing = 8,
-            IsVisible = false,
             VerticalOptions = LayoutOptions.Center,
         };
         var editAva = new Grid
@@ -252,7 +251,8 @@ public partial class LauncherPage : ContentPage
         editBtns.Children.Add(del);
         edit.Children.Add(editBtns);
         // Scroll safety: tall native rows must never clip the buttons.
-        var editScroll = new ScrollView { Content = edit };
+        // (Flip toggles THIS wrapper — the inner stack stays visible.)
+        var editScroll = new ScrollView { Content = edit, IsVisible = false };
         face.Children.Add(editScroll);
 
         var card = new Border
