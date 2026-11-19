@@ -16,6 +16,7 @@ public partial class LauncherPage : ContentPage
     readonly AdBlockService _ads;
     bool _adding;
     Profile? _avaEditing;
+    DateTime _lastInnerTap;
 
     public LauncherPage(ProfileStore store, IServiceProvider services, AdBlockService ads)
     {
@@ -137,7 +138,7 @@ public partial class LauncherPage : ContentPage
             HorizontalOptions = LayoutOptions.Center
         };
         avaRow.Children.Add(AvatarView.Build(p, 64));
-        avaRow.Children.Add(MakePenButton(() => Flip(face, true, p)));
+        avaRow.Children.Add(MakePenButton(() => { _lastInnerTap = DateTime.UtcNow; Flip(face, true, p); }));
         front.Children.Add(avaRow);
         front.Children.Add(new Label
         {
@@ -166,7 +167,7 @@ public partial class LauncherPage : ContentPage
             HorizontalOptions = LayoutOptions.Center
         };
         RefreshEditAvatar(editAva, p);
-        editAva.Children.Add(MakePenButton(() => OpenAvaPop(p)));
+        editAva.Children.Add(MakePenButton(() => { _lastInnerTap = DateTime.UtcNow; OpenAvaPop(p); }));
         edit.Children.Add(editAva);
         var nameEntry = new Entry
         {
@@ -264,7 +265,14 @@ public partial class LauncherPage : ContentPage
         };
         card.GestureRecognizers.Add(new TapGestureRecognizer
         {
-            Command = new Command(async () => await OpenProfile(p))
+            // Nested-tap guard: MAUI fires BOTH the pen/shield tap and this
+            // card tap. Inner handlers stamp the time; a card tap landing
+            // within 500ms of one is the same finger — swallow it.
+            Command = new Command(async () =>
+            {
+                if ((DateTime.UtcNow - _lastInnerTap).TotalMilliseconds < 500) return;
+                await OpenProfile(p);
+            })
         });
 
         // shield toggle on the card's bottom-right corner (toggles, never navigates)
@@ -357,6 +365,7 @@ public partial class LauncherPage : ContentPage
         {
             Command = new Command(() =>
             {
+                _lastInnerTap = DateTime.UtcNow;
                 p.AdBlock = !p.AdBlock;
                 _store.SaveProfiles();
                 Sync();
