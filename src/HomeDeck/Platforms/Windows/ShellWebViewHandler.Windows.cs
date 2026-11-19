@@ -43,6 +43,7 @@ public partial class ShellWebViewHandler
                     if (string.IsNullOrEmpty(url)) return;
                     if (_ads.ShouldBlock(url, view.PageHost, GuessType(url, e.Request.Headers)))
                     {
+                        view.CountBlocked();
                         var env = (s as Microsoft.Web.WebView2.Core.CoreWebView2)?.Environment;
                         if (env != null)
                             e.Response = env.CreateWebResourceResponse(

@@ -17,4 +17,13 @@ public class ShellWebView : WebView
 
     /// <summary>Host of the top-level page (for third-party checks).</summary>
     public string PageHost { get; set; } = "";
+
+    int _blocked;
+
+    /// <summary>Requests blocked on the current page load (snapshot for UI).</summary>
+    public int BlockedCount => _blocked;
+
+    public void CountBlocked() => Interlocked.Increment(ref _blocked);
+
+    public void ResetBlockedCount() => Interlocked.Exchange(ref _blocked, 0);
 }

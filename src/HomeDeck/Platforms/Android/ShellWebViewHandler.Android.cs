@@ -94,8 +94,11 @@ public partial class ShellWebViewHandler
                     var reqHeaders = request.RequestHeaders;
                     string type = GuessType(url, reqHeaders);
                     if (_ads.ShouldBlock(url, _view.PageHost, type))
+                    {
+                        _view.CountBlocked();
                         return new WebResourceResponse("text/plain", "utf-8", 403, "Blocked",
                             new Dictionary<string, string>(), new MemoryStream(Array.Empty<byte>()));
+                    }
                 }
             }
             catch { /* fail open */ }

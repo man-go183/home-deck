@@ -149,6 +149,7 @@ public partial class BrowserPage : ContentPage
     void StartNavigation(Profile p)
     {
         Web.Source = new UrlWebViewSource { Url = p.Url };
+        Web.ResetBlockedCount();
         Splash.IsVisible = true;
         _navStarted = false;
         SplashStatus.Text = "Loading…";
@@ -329,6 +330,17 @@ public partial class BrowserPage : ContentPage
                 Command = new Command(() => cb.IsChecked = !cb.IsChecked)
             });
             DropList.Children.Add(row);
+            if (_profile.AdBlock)
+            {
+                // Subtitle-style proof row: smaller + fainter than menu text.
+                DropList.Children.Add(new Label
+                {
+                    Text = $"Blocked {Web.BlockedCount} on this page",
+                    FontSize = 11,
+                    TextColor = Color.FromRgba(242, 237, 232, 110),
+                    Padding = new Thickness(10, 0, 10, 4),
+                });
+            }
             DropList.Children.Add(MenuDivider());
 
             DropList.Children.Add(MenuButton("Open in browser  ↗", async () =>
