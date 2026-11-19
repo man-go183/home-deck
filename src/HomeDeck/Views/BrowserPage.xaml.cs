@@ -331,7 +331,7 @@ public partial class BrowserPage : ContentPage
             DropList.Children.Add(row);
             DropList.Children.Add(MenuDivider());
 
-            DropList.Children.Add(MenuButton("↗  Open in browser", async () =>
+            DropList.Children.Add(MenuButton("Open in browser  ↗", async () =>
             {
                 Drop.IsVisible = false;
                 if (_profile != null)
