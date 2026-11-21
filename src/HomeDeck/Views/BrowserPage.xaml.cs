@@ -465,7 +465,23 @@ public partial class BrowserPage : ContentPage
         var rows = new VerticalStackLayout { Spacing = 2 };
         foreach (var s in _ads.GetListStatus())
             rows.Children.Add(AdsListRow(s, dim));
-        AdsPanelBody.Children.Add(rows);
+        // Locked list region: fixed height, own scroll. The list can grow
+        // (custom lists later) without pushing Update/cadence/Done off-panel.
+        // The outer panel scroll remains as the overflow safety net.
+        var listScroll = new ScrollView
+        {
+            Content = rows,
+            HeightRequest = 200,
+            VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+        };
+        AdsPanelBody.Children.Add(new Border
+        {
+            Stroke = Color.FromRgba(255, 255, 255, 45),
+            StrokeThickness = 1,
+            StrokeShape = new Microsoft.Maui.Controls.Shapes.RoundRectangle { CornerRadius = 10 },
+            Padding = new Thickness(4),
+            Content = listScroll,
+        });
         var upd = new Button
         {
             Text = _updating ? "Updating…" : "Update now",
