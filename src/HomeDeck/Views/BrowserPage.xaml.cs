@@ -378,7 +378,7 @@ public partial class BrowserPage : ContentPage
 
     /// <summary>Mock-style hover fill for menu rows (transparent buttons show
     /// no native hover on Windows, so paint it explicitly).</summary>
-    static void AddHoverBg(VisualElement row)
+    static void AddHoverBg(View row)
     {
         var hover = new PointerGestureRecognizer();
         hover.PointerEntered += (_, _) => row.BackgroundColor = Color.FromRgba(255, 255, 255, 20);
@@ -472,7 +472,7 @@ public partial class BrowserPage : ContentPage
         {
             Content = rows,
             HeightRequest = 200,
-            VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+            VerticalScrollBarVisibility = ScrollBarVisibility.Default,
         };
         AdsPanelBody.Children.Add(new Border
         {
