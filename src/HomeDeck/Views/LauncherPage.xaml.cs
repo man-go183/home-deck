@@ -87,8 +87,9 @@ public partial class LauncherPage : ContentPage
 #endif
         // Warm the ad-block lists at launch (not on first profile open), so
         // they're ready before any tap. Fail-safe inside; never blocks UI.
-        _ = _ads.EnsureLoadedAsync();
         await _store.LoadAsync();
+        _ads.RefreshDays = _store.Prefs.ListRefreshDays;
+        _ = _ads.EnsureLoadedAsync();
         AskChk.IsChecked = _store.Prefs.AskEveryTime;
         BuildCards();
 

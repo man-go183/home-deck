@@ -15,6 +15,8 @@ public partial class BrowserPage : ContentPage
     bool _appeared;
     string? _pendingUrl;
     bool _navStarted;
+    bool _updating;
+    bool _lastUpdateFailed;
 #if ANDROID
     bool _titleViewSet;
 #endif
@@ -135,6 +137,7 @@ public partial class BrowserPage : ContentPage
 
         _store.Prefs.LastProfileId = p.Id;
         _store.SavePrefs();
+        _ads.RefreshDays = _store.Prefs.ListRefreshDays;
         _ = _ads.EnsureLoadedAsync();
     }
 
@@ -251,6 +254,8 @@ public partial class BrowserPage : ContentPage
 
     protected override bool OnBackButtonPressed()
     {
+        if (AdsPanel.IsVisible) { CloseAdsPanel(); return true; }
+        if (Drop.IsVisible) { Drop.IsVisible = false; return true; }
         if (Web.CanGoBack) { Web.GoBack(); return true; }
         return base.OnBackButtonPressed();
     }
@@ -315,7 +320,7 @@ public partial class BrowserPage : ContentPage
         {
             var row = new HorizontalStackLayout { Spacing = 10, Padding = new Thickness(10, 8) };
             var cb = new HdCheckBox { IsChecked = _profile.AdBlock, VerticalOptions = LayoutOptions.Center };
-            var lab = new Label { Text = "Block ads & trackers", TextColor = Colors.White, VerticalOptions = LayoutOptions.Center };
+            var lab = new Label { Text = "Block ads & trackers", TextColor = Colors.White, VerticalOptions = LayoutOptions.Center, HorizontalOptions = LayoutOptions.StartAndExpand };
             cb.CheckedChanged += (_, on) =>
             {
                 if (_profile == null) return;
@@ -325,10 +330,26 @@ public partial class BrowserPage : ContentPage
                 _store.SaveProfiles();
             };
             row.Children.Add(cb); row.Children.Add(lab);
-            row.GestureRecognizers.Add(new TapGestureRecognizer
+            // Split tap zones (nested taps both fire): cb + label toggle via
+            // the label's own tap below; the chevron opens the settings panel.
+            // (No row-level toggle — it would misfire into the chevron.)
+            lab.GestureRecognizers.Add(new TapGestureRecognizer
             {
                 Command = new Command(() => cb.IsChecked = !cb.IsChecked)
             });
+            var chev = new Label
+            {
+                Text = "›",
+                FontSize = 18,
+                TextColor = (Color)Application.Current!.Resources["HdDim"],
+                VerticalOptions = LayoutOptions.Center,
+                Padding = new Thickness(12, 2),
+            };
+            chev.GestureRecognizers.Add(new TapGestureRecognizer
+            {
+                Command = new Command(() => OpenAdsPanel())
+            });
+            row.Children.Add(chev);
             AddHoverBg(row);
             DropList.Children.Add(row);
             if (_profile.AdBlock)
@@ -363,6 +384,191 @@ public partial class BrowserPage : ContentPage
         hover.PointerEntered += (_, _) => row.BackgroundColor = Color.FromRgba(255, 255, 255, 20);
         hover.PointerExited += (_, _) => row.BackgroundColor = Colors.Transparent;
         row.GestureRecognizers.Add(hover);
+    }
+
+    void OnAdsDimTap(object? sender, TappedEventArgs e) => CloseAdsPanel();
+
+    void OpenAdsPanel()
+    {
+        if (_profile == null) return;
+        Drop.IsVisible = false;
+        _lastUpdateFailed = false;
+        RebuildAdsPanel();
+        AdsDim.IsVisible = true;
+        AdsPanel.IsVisible = true;
+    }
+
+    void CloseAdsPanel()
+    {
+        AdsPanel.IsVisible = false;
+        AdsDim.IsVisible = false;
+    }
+
+    /// <summary>Adblock settings panel body: status toggle + count, filter
+    /// lists, Update now, refresh cadence, Done. Rebuilt on open,
+    /// after cadence/toggle changes, and after updates.</summary>
+    void RebuildAdsPanel()
+    {
+        var p = _profile;
+        AdsPanelBody.Children.Clear();
+        if (p == null) { CloseAdsPanel(); return; }
+        var dim = (Color)Application.Current!.Resources["HdDim"];
+        var gold = (Color)Application.Current.Resources["HdGold"];
+        var bg = (Color)Application.Current.Resources["HdBg"];
+        AdsPanelBody.Children.Add(new Label
+        {
+            Text = "Ad blocking",
+            FontSize = 18,
+            FontAttributes = FontAttributes.Bold,
+            TextColor = Colors.White,
+        });
+        var tcb = new HdCheckBox { IsChecked = p.AdBlock, VerticalOptions = LayoutOptions.Center };
+        var tlab = new Label
+        {
+            Text = "Block ads & trackers",
+            TextColor = Colors.White,
+            FontSize = 13,
+            VerticalOptions = LayoutOptions.Center,
+            HorizontalOptions = LayoutOptions.StartAndExpand,
+        };
+        tlab.GestureRecognizers.Add(new TapGestureRecognizer
+        {
+            Command = new Command(() => tcb.IsChecked = !tcb.IsChecked)
+        });
+        tcb.CheckedChanged += (_, on) =>
+        {
+            p.AdBlock = on;
+            Web.AdBlockEnabled = on;
+            SyncShield(p);
+            _store.SaveProfiles();
+        };
+        var trow = new HorizontalStackLayout { Spacing = 10, Padding = new Thickness(10, 8) };
+        trow.Children.Add(tcb);
+        trow.Children.Add(tlab);
+        AddHoverBg(trow);
+        AdsPanelBody.Children.Add(trow);
+        AdsPanelBody.Children.Add(new Label
+        {
+            Text = $"Blocked {Web.BlockedCount} on this page",
+            FontSize = 11,
+            TextColor = Color.FromRgba(242, 237, 232, 110),
+            Padding = new Thickness(10, 0, 10, 4),
+        });
+        AdsPanelBody.Children.Add(MenuDivider());
+        AdsPanelBody.Children.Add(new Label
+        {
+            Text = "FILTER LISTS",
+            FontSize = 11,
+            TextColor = dim,
+            Padding = new Thickness(10, 4, 10, 0),
+        });
+        var rows = new VerticalStackLayout { Spacing = 2 };
+        foreach (var s in _ads.GetListStatus())
+            rows.Children.Add(AdsListRow(s, dim));
+        AdsPanelBody.Children.Add(rows);
+        var upd = new Button
+        {
+            Text = _updating ? "Updating…" : "Update now",
+            BackgroundColor = gold,
+            TextColor = bg,
+            CornerRadius = 10,
+            IsEnabled = !_updating,
+        };
+        upd.Clicked += async (_, _) => await UpdateListsAsync();
+        AdsPanelBody.Children.Add(upd);
+        AdsPanelBody.Children.Add(new Label
+        {
+            Text = "Some lists couldn't download — kept the current blocking.",
+            FontSize = 12,
+            TextColor = Color.FromArgb("#E14B32"),
+            IsVisible = _lastUpdateFailed,
+        });
+        AdsPanelBody.Children.Add(new Label
+        {
+            Text = "Refresh lists",
+            FontSize = 13,
+            TextColor = Colors.White,
+            Padding = new Thickness(10, 8, 10, 0),
+        });
+        var crow = new HorizontalStackLayout { Spacing = 7, HorizontalOptions = LayoutOptions.Center };
+        foreach (var (label, days) in new[] { ("Daily", 1), ("Weekly", 7), ("Monthly", 30) })
+        {
+            bool sel = _store.Prefs.ListRefreshDays == days;
+            var b = new Button
+            {
+                Text = label,
+                FontSize = 13,
+                CornerRadius = 8,
+                Padding = new Thickness(14, 7),
+                BackgroundColor = sel ? gold : Colors.Transparent,
+                TextColor = sel ? bg : dim,
+                BorderWidth = sel ? 0 : 1,
+                BorderColor = dim,
+            };
+            int d = days;
+            b.Clicked += (_, _) =>
+            {
+                _store.Prefs.ListRefreshDays = d;
+                _store.SavePrefs();
+                _ads.RefreshDays = d;
+                RebuildAdsPanel();
+            };
+            crow.Children.Add(b);
+        }
+        AdsPanelBody.Children.Add(crow);
+        var done = new Button
+        {
+            Text = "Done",
+            BackgroundColor = gold,
+            TextColor = bg,
+            CornerRadius = 10,
+        };
+        done.Clicked += (_, _) => CloseAdsPanel();
+        AdsPanelBody.Children.Add(done);
+    }
+
+    static View AdsListRow(AdBlockService.ListStatus s, Color dim)
+    {
+        string sub = !s.HasCache ? "Not downloaded yet"
+            : s.UpdatedUtc == null ? "Saved copy, age unknown"
+            : $"Updated {RelAge(s.UpdatedUtc.Value)} · {FmtSize(s.Bytes)}";
+        var box = new VerticalStackLayout { Padding = new Thickness(10, 6) };
+        box.Children.Add(new Label { Text = s.Name, FontSize = 13, TextColor = Colors.White });
+        box.Children.Add(new Label
+        {
+            Text = sub,
+            FontSize = 11,
+            TextColor = s.HasCache ? dim : Color.FromArgb("#E14B32"),
+        });
+        return box;
+    }
+
+    static string RelAge(DateTime utc)
+    {
+        var age = DateTime.UtcNow - utc;
+        if (age.TotalMinutes < 1) return "just now";
+        if (age.TotalHours < 1) return $"{(int)age.TotalMinutes} min ago";
+        if (age.TotalDays < 1) return $"{(int)age.TotalHours} h ago";
+        if (age.TotalDays < 30) return $"{(int)age.TotalDays} days ago";
+        return utc.ToLocalTime().ToString("d MMM yyyy");
+    }
+
+    static string FmtSize(long bytes)
+        => bytes < 1024 * 1024 ? $"{bytes / 1024} KB" : $"{bytes / (1024.0 * 1024):0.0} MB";
+
+    async Task UpdateListsAsync()
+    {
+        if (_updating) return;
+        _updating = true;
+        _lastUpdateFailed = false;
+        _ads.RefreshDays = _store.Prefs.ListRefreshDays;
+        RebuildAdsPanel();
+        try { await _ads.EnsureLoadedAsync(force: true); }
+        catch { }
+        _updating = false;
+        try { _lastUpdateFailed = _ads.GetListStatus().Any(s => !s.HasCache); }
+        catch { _lastUpdateFailed = true; }
+        RebuildAdsPanel();
     }
 
     /// <summary>De-boxed menu button (native button borders show through on

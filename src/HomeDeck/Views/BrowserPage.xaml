@@ -76,6 +76,24 @@
         </Border.StrokeShape>
         <VerticalStackLayout x:Name="DropList" Spacing="2" />
       </Border>
+      <!-- adblock settings panel -->
+      <BoxView x:Name="AdsDim" IsVisible="false" Color="#80000000"
+               HorizontalOptions="FillAndExpand" VerticalOptions="FillAndExpand">
+        <BoxView.GestureRecognizers>
+          <TapGestureRecognizer Tapped="OnAdsDimTap" />
+        </BoxView.GestureRecognizers>
+      </BoxView>
+      <Border x:Name="AdsPanel" IsVisible="false"
+              BackgroundColor="#000000" Stroke="#3A342D"
+              HorizontalOptions="Center" VerticalOptions="Center"
+              Padding="18" MaximumWidthRequest="420" MaximumHeightRequest="520">
+        <Border.StrokeShape>
+          <RoundRectangle CornerRadius="14" />
+        </Border.StrokeShape>
+        <ScrollView>
+          <VerticalStackLayout x:Name="AdsPanelBody" Spacing="8" />
+        </ScrollView>
+      </Border>
     </Grid>
   </Grid>
 </ContentPage>

@@ -37,4 +37,5 @@ public sealed class ShellPrefs
 {
     public bool AskEveryTime { get; set; } = true;
     public string? LastProfileId { get; set; }
+    public int ListRefreshDays { get; set; } = 7;
 }

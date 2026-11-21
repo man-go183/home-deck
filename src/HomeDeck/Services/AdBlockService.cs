@@ -35,11 +35,15 @@ public sealed class AdBlockService
     readonly RustFilterEngine _engine = new();
     DateTime _loadedAt = DateTime.MinValue;
 
+    /// <summary>List refresh cadence in days (global pref, default 7).</summary>
+    public int RefreshDays { get; set; } = 7;
+
     public bool Ready => _loadedAt != DateTime.MinValue;
 
-    public async Task EnsureLoadedAsync()
+    public async Task EnsureLoadedAsync(bool force = false)
     {
-        if ((DateTime.UtcNow - _loadedAt).TotalDays < 7 && Ready) return;
+        int days = Math.Max(1, RefreshDays);
+        if (!force && (DateTime.UtcNow - _loadedAt).TotalDays < days && Ready) return;
         var all = new List<string>();
         foreach (var list in DefaultLists)
         {
@@ -48,7 +52,7 @@ public sealed class AdBlockService
                 var path = Path.Combine(FileSystem.AppDataDirectory, list.Name + ".txt");
                 string text;
                 var info = new FileInfo(path);
-                if (info.Exists && (DateTime.UtcNow - info.LastWriteTimeUtc).TotalDays < 7)
+                if (info.Exists && !force && (DateTime.UtcNow - info.LastWriteTimeUtc).TotalDays < days)
                 {
                     text = await File.ReadAllTextAsync(path);
                 }
@@ -128,4 +132,34 @@ public sealed class AdBlockService
     /// cosmetic matching. Capped (2000 classes, 500 ids).</summary>
     public const string ClassSnapshotJs =
         "(function(){try{var s={},o=[];document.querySelectorAll('[class]').forEach(function(e){e.classList.forEach(function(x){if(!s[x]){s[x]=1;o.push(x)}})});var t={},p=[];document.querySelectorAll('[id]').forEach(function(e){if(e.id&&!t[e.id]){t[e.id]=1;p.push(e.id)}});return JSON.stringify({c:o.slice(0,2000),i:p.slice(0,500)})}catch(e){return '{}'}})()";
+
+    /// <summary>On-device filter-list status for the settings panel.</summary>
+    public sealed class ListStatus
+    {
+        public string Name { get; set; } = "";
+        public DateTime? UpdatedUtc { get; set; }
+        public long Bytes { get; set; }
+        public bool HasCache => Bytes > 0;
+    }
+
+    public IReadOnlyList<ListStatus> GetListStatus()
+    {
+        var res = new List<ListStatus>();
+        foreach (var list in DefaultLists)
+        {
+            try
+            {
+                var path = Path.Combine(FileSystem.AppDataDirectory, list.Name + ".txt");
+                var info = new FileInfo(path);
+                res.Add(new ListStatus
+                {
+                    Name = list.Name,
+                    UpdatedUtc = info.Exists ? info.LastWriteTimeUtc : null,
+                    Bytes = info.Exists ? info.Length : 0,
+                });
+            }
+            catch { res.Add(new ListStatus { Name = list.Name }); }
+        }
+        return res;
+    }
 }
