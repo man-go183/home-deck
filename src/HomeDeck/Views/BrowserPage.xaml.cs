@@ -329,6 +329,7 @@ public partial class BrowserPage : ContentPage
             {
                 Command = new Command(() => cb.IsChecked = !cb.IsChecked)
             });
+            AddHoverBg(row);
             DropList.Children.Add(row);
             if (_profile.AdBlock)
             {
@@ -354,6 +355,16 @@ public partial class BrowserPage : ContentPage
         }
     }
 
+    /// <summary>Mock-style hover fill for menu rows (transparent buttons show
+    /// no native hover on Windows, so paint it explicitly).</summary>
+    static void AddHoverBg(VisualElement row)
+    {
+        var hover = new PointerGestureRecognizer();
+        hover.PointerEntered += (_, _) => row.BackgroundColor = Color.FromRgba(255, 255, 255, 20);
+        hover.PointerExited += (_, _) => row.BackgroundColor = Colors.Transparent;
+        row.GestureRecognizers.Add(hover);
+    }
+
     /// <summary>De-boxed menu button (native button borders show through on
     /// Windows, so kill them explicitly). Slim mock-style padding.</summary>
     static Button MenuButton(string text, Func<Task> onTap)
@@ -369,6 +380,7 @@ public partial class BrowserPage : ContentPage
             HorizontalOptions = LayoutOptions.Fill,
         };
         b.Clicked += async (_, _) => await onTap();
+        AddHoverBg(b);
         return b;
     }
 
@@ -385,9 +397,6 @@ public partial class BrowserPage : ContentPage
     static void AddRowTap(HorizontalStackLayout row, Action onTap)
     {
         row.GestureRecognizers.Add(new TapGestureRecognizer { Command = new Command(onTap) });
-        var hover = new PointerGestureRecognizer();
-        hover.PointerEntered += (_, _) => row.BackgroundColor = Color.FromRgba(255, 255, 255, 0.08);
-        hover.PointerExited += (_, _) => row.BackgroundColor = Colors.Transparent;
-        row.GestureRecognizers.Add(hover);
+        AddHoverBg(row);
     }
 }
