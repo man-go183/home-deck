@@ -39,6 +39,15 @@ class HomeDeckJsBridge : Java.Lang.Object
     [Android.Webkit.JavascriptInterface, Java.Interop.Export("getDevice")] public string GetDevice() => DeviceBridge.GetDevice();
     [Android.Webkit.JavascriptInterface, Java.Interop.Export("vibrate")] public string Vibrate(int millis) => DeviceBridge.Vibrate(millis);
 
+    /// <summary>Element picker report (fire-and-forget): page JS calls
+    /// HomeDeckNative.reportPicked(host, selector). Runs on a Java bridge
+    /// thread — never touches the view; AdBlockService marshals onward.</summary>
+    [Android.Webkit.JavascriptInterface, Java.Interop.Export("reportPicked")]
+    public void ReportPicked(string host, string selector)
+    {
+        try { _ads.ReportPickerPick(host, selector); } catch { }
+    }
+
     [Android.Webkit.JavascriptInterface, Java.Interop.Export("shareText")]
     public void ShareText(string id, string? text, string? title)
         => Task.Run(async () => Resolve(id, await DeviceBridge.ShareTextAsync(text, title)));

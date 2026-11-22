@@ -44,6 +44,9 @@ public sealed class ShellPrefs
 
     /// <summary>User-added filter lists (global, like the built-ins).</summary>
     public List<CustomList> CustomLists { get; set; } = new();
+
+    /// <summary>Picked-element hide rules (per-site). Capped at 500.</summary>
+    public List<PickerRule> PickerRules { get; set; } = new();
 }
 
 /// <summary>A user-added filter list (global, like the built-ins).</summary>
@@ -52,4 +55,11 @@ public sealed class CustomList
     public string Name { get; set; } = "";
     public string Url { get; set; } = "";
     public bool Enabled { get; set; } = true;
+}
+
+/// <summary>An element the user picked to hide (per-site cosmetic rule).</summary>
+public sealed class PickerRule
+{
+    public string Host { get; set; } = "";
+    public string Selector { get; set; } = "";
 }

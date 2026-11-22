@@ -34,6 +34,20 @@ public partial class ShellWebViewHandler
                         () => { _ = wv.ExecuteScriptAsync($"window.__hdResolveMsg({msg})"); })));
 
             core.AddWebResourceRequestedFilter("*", Microsoft.Web.WebView2.Core.CoreWebView2WebResourceContext.All);
+            // Element picker reports (shell.js postMessage {type:"hd-pick"}).
+            core.WebMessageReceived += (s, e) =>
+            {
+                try
+                {
+                    using var doc = JsonDocument.Parse(e.WebMessageAsJson);
+                    var root = doc.RootElement;
+                    if (root.TryGetProperty("type", out var t) && t.GetString() == "hd-pick")
+                        _ads?.ReportPickerPick(
+                            root.TryGetProperty("host", out var h) ? h.GetString() ?? "" : "",
+                            root.TryGetProperty("selector", out var x) ? x.GetString() ?? "" : "");
+                }
+                catch { }
+            };
             core.WebResourceRequested += (s, e) =>
             {
                 try

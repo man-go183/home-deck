@@ -37,6 +37,7 @@ public partial class BrowserPage : ContentPage
 #endif
         _store = store;
         _ads = ads;
+        _ads.OnPickerReported = OnPickerReported;
 
         Web.Navigating += (_, e) =>
         {
@@ -144,7 +145,37 @@ public partial class BrowserPage : ContentPage
 
     /// <summary>Push the user's list config (prefs) into the loader.</summary>
     void PushListsToAds()
-        => _ads.ApplyConfig(_store.Prefs.DisabledLists, _store.Prefs.CustomLists);
+        => _ads.ApplyConfig(_store.Prefs.DisabledLists, _store.Prefs.CustomLists, _store.Prefs.PickerRules);
+
+    /// <summary>Picked element reported by page JS: save the per-site rule
+    /// and rebuild the engine (lists from cache + rules). The element is
+    /// already hidden live in the page by the picker overlay.</summary>
+    async void OnPickerReported(string host, string selector)
+    {
+        try
+        {
+            if (!_store.Prefs.PickerRules.Any(r => r.Host == host && r.Selector == selector))
+            {
+                if (_store.Prefs.PickerRules.Count >= 500) return;
+                _store.Prefs.PickerRules.Add(new PickerRule { Host = host, Selector = selector });
+                _store.SavePrefs();
+                PushListsToAds();
+                await _ads.ReloadFromCacheAsync();
+            }
+            if (AdsPanel.IsVisible) RebuildAdsPanel();
+        }
+        catch { }
+    }
+
+    async Task RemovePickerRuleAsync(string host, string selector)
+    {
+        if (_updating) return;
+        _store.Prefs.PickerRules.RemoveAll(r => r.Host == host && r.Selector == selector);
+        _store.SavePrefs();
+        PushListsToAds();
+        await _ads.ReloadFromCacheAsync();
+        RebuildAdsPanel();
+    }
 
     void SyncShield(Profile p)
     {
@@ -370,6 +401,14 @@ public partial class BrowserPage : ContentPage
             }
             DropList.Children.Add(MenuDivider());
 
+            DropList.Children.Add(MenuButton("Hide element…", async () =>
+            {
+                Drop.IsVisible = false;
+                if (_profile == null) return;
+                try { await Web.EvaluateJavaScriptAsync("window.HomeDeckPick&&window.HomeDeckPick.start()"); } catch { }
+            }));
+            DropList.Children.Add(MenuDivider());
+
             DropList.Children.Add(MenuButton("Open in browser  ↗", async () =>
             {
                 Drop.IsVisible = false;
@@ -535,6 +574,51 @@ public partial class BrowserPage : ContentPage
         AdsPanelBody.Children.Add(urlEntry);
         AdsPanelBody.Children.Add(addErr);
         AdsPanelBody.Children.Add(addBtn);
+        var picks = _store.Prefs.PickerRules;
+        if (picks.Count > 0)
+        {
+            AdsPanelBody.Children.Add(new Label
+            {
+                Text = "PICKED ELEMENTS",
+                FontSize = 11,
+                TextColor = dim,
+                Padding = new Thickness(10, 8, 10, 0),
+            });
+            foreach (var r in picks)
+            {
+                string host = r.Host, selector = r.Selector;
+                string shown = selector.Length > 80 ? selector.Substring(0, 80) + "…" : selector;
+                var texts = new VerticalStackLayout
+                {
+                    Spacing = 0,
+                    VerticalOptions = LayoutOptions.Center,
+                    HorizontalOptions = LayoutOptions.StartAndExpand,
+                };
+                texts.Children.Add(new Label { Text = host, FontSize = 13, TextColor = Colors.White });
+                texts.Children.Add(new Label { Text = shown, FontSize = 11, TextColor = dim });
+                var rm = new Button
+                {
+                    Text = "✕",
+                    FontSize = 12,
+                    TextColor = dim,
+                    BackgroundColor = Colors.Transparent,
+                    BorderWidth = 0,
+                    Padding = new Thickness(8, 2),
+                    VerticalOptions = LayoutOptions.Center,
+                };
+                rm.Clicked += async (_, _) =>
+                {
+                    bool go = await DisplayAlert("Remove rule?",
+                        $"Stop hiding this on {host}? It will reappear after you reload the page.", "Remove", "Keep");
+                    if (go) await RemovePickerRuleAsync(host, selector);
+                };
+                var prow = new HorizontalStackLayout { Spacing = 10, Padding = new Thickness(10, 6) };
+                prow.Children.Add(texts);
+                prow.Children.Add(rm);
+                AddHoverBg(prow);
+                AdsPanelBody.Children.Add(prow);
+            }
+        }
         var upd = new Button
         {
             Text = _updating ? "Updating…" : "Update now",

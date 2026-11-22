@@ -1,4 +1,5 @@
 using HomeDeck.Models;
+using Microsoft.Maui.ApplicationModel;
 using Microsoft.Maui.Storage;
 
 namespace HomeDeck.Services;
@@ -40,14 +41,46 @@ public sealed class AdBlockService
 
     HashSet<string> _disabled = new(StringComparer.OrdinalIgnoreCase);
     List<CustomList> _customs = new();
+    List<PickerRule> _pickers = new();
+
+    /// <summary>Fired on the UI thread when page JS reports a picked
+    /// element (host, selector). The page owns prefs: it saves, pushes
+    /// config back, and rebuilds the engine.</summary>
+    public Action<string, string>? OnPickerReported;
 
     /// <summary>Push the user's list config (page owns prefs, service
     /// owns loading). Must be called before any load.</summary>
-    public void ApplyConfig(IEnumerable<string>? disabled, IEnumerable<CustomList>? customs)
+    public void ApplyConfig(IEnumerable<string>? disabled, IEnumerable<CustomList>? customs, IEnumerable<PickerRule>? pickers = null)
     {
         _disabled = new HashSet<string>(disabled ?? Enumerable.Empty<string>(), StringComparer.OrdinalIgnoreCase);
         _customs = (customs ?? Enumerable.Empty<CustomList>())
             .Select(c => new CustomList { Name = c.Name, Url = c.Url, Enabled = c.Enabled }).ToList();
+        _pickers = (pickers ?? Enumerable.Empty<PickerRule>())
+            .Select(r => new PickerRule { Host = r.Host, Selector = r.Selector }).Take(500).ToList();
+    }
+
+    /// <summary>Entry point for the platform JS bridges (any thread).
+    /// Sanitizes and forwards to <see cref="OnPickerReported"/>.</summary>
+    public void ReportPickerPick(string host, string selector)
+    {
+        host = (host ?? "").Trim().ToLowerInvariant();
+        selector = (selector ?? "").Trim();
+        if (host.Length == 0 || host.Length > 253 || selector.Length == 0 || selector.Length > 500) return;
+        var cb = OnPickerReported;
+        if (cb == null) return;
+        try { MainThread.BeginInvokeOnMainThread(() => { try { cb(host, selector); } catch { } }); }
+        catch { }
+    }
+
+    /// <summary>Picked-element rules as filter text (host##selector).</summary>
+    IEnumerable<string> PickerRuleLines()
+    {
+        foreach (var r in _pickers)
+        {
+            var h = (r.Host ?? "").Trim().ToLowerInvariant();
+            var s = (r.Selector ?? "").Trim();
+            if (h.Length > 0 && s.Length > 0 && s.Length <= 500) yield return h + "##" + s;
+        }
     }
 
     /// <summary>One loadable list: built-in or custom.</summary>
@@ -137,6 +170,7 @@ public sealed class AdBlockService
             }
             catch { /* stale cache or nothing; keep going */ }
         }
+        all.AddRange(PickerRuleLines());
         if (all.Count > 0 && RustFilterEngine.LoadAllRules(string.Join("\n", all)))
             _loadedAt = DateTime.UtcNow;
     }
@@ -157,6 +191,7 @@ public sealed class AdBlockService
             }
             catch { }
         }
+        all.AddRange(PickerRuleLines());
         if (RustFilterEngine.LoadAllRules(string.Join("\n", all)))
             _loadedAt = DateTime.UtcNow;
     }
