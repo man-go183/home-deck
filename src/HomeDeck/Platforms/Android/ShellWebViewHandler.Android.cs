@@ -13,10 +13,12 @@ namespace HomeDeck.Handlers;
 public partial class ShellWebViewHandler
 {
     AdBlockService? _ads;
+    Android.Webkit.WebView? _wv;
 
     protected override void ConnectHandler(Android.Webkit.WebView platformView)
     {
         base.ConnectHandler(platformView);
+        _wv = platformView;
         _ads = MauiContext?.Services.GetService<AdBlockService>();
 
         platformView.Settings!.JavaScriptEnabled = true;
@@ -49,7 +51,39 @@ public partial class ShellWebViewHandler
     protected override void DisconnectHandler(Android.Webkit.WebView platformView)
     {
         try { platformView.RemoveJavascriptInterface("HomeDeckNative"); } catch { }
+        if (_wv == platformView) _wv = null;
         base.DisconnectHandler(platformView);
+    }
+
+    /// <summary>null = engine ready, else "fail: …".</summary>
+    partial Task<string?> EnsureEngineAsync()
+    {
+        if (_wv == null) return Task.FromResult<string?>("fail: view: no page view yet (open a profile first).");
+        return Task.FromResult<string?>(null);
+    }
+
+    sealed class JsValue : Java.Lang.Object, IValueCallback
+    {
+        readonly TaskCompletionSource<string> _tcs;
+        public JsValue(TaskCompletionSource<string> tcs) { _tcs = tcs; }
+        public void OnReceiveValue(Java.Lang.Object? value)
+        {
+            try { _tcs.TrySetResult(value?.ToString() ?? "null"); } catch { }
+        }
+    }
+
+    /// <summary>Raw script eval (bypasses the MAUI wrapper). Never throws:
+    /// channel errors come back as THROW:/TIMEOUT.</summary>
+    partial async Task<string> EvalJsAsync(string js)
+    {
+        var wv = _wv;
+        if (wv == null) return "THROW:NoView";
+        var tcs = new TaskCompletionSource<string>();
+        try { wv.EvaluateJavascript(js, new JsValue(tcs)); }
+        catch (Exception e) { return "THROW:" + e.GetType().Name + ":" + Trunc(e.Message); }
+        var winner = await Task.WhenAny(tcs.Task, Task.Delay(10000));
+        if (winner != tcs.Task) return "TIMEOUT:eval exceeded 10s";
+        return await tcs.Task;
     }
 
     async Task InjectCosmeticsAsync(ShellWebView v)

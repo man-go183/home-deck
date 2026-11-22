@@ -1,4 +1,5 @@
 using HomeDeck.Controls;
+using HomeDeck.Handlers;
 using HomeDeck.Models;
 using HomeDeck.Services;
 using Microsoft.Maui.ApplicationModel;
@@ -405,7 +406,13 @@ public partial class BrowserPage : ContentPage
             {
                 Drop.IsVisible = false;
                 if (_profile == null) return;
-                try { await Web.EvaluateJavaScriptAsync("window.HomeDeckPick&&window.HomeDeckPick.start()"); } catch { }
+                string res = "fail: shell: no platform view (shell not attached)";
+                try
+                {
+                    if (Web.Handler is ShellWebViewHandler h) res = await h.StartPickerModeAsync();
+                }
+                catch (Exception e) { res = "fail: shell: arm call crashed (" + e.GetType().Name + ": " + e.Message + ")"; }
+                if (res != "ok") await SayPickAsync(res);
             }));
             DropList.Children.Add(MenuDivider());
 
@@ -418,6 +425,13 @@ public partial class BrowserPage : ContentPage
                 }
             }));
         }
+    }
+
+    /// <summary>Picker arm/report failure dialog. DisplayAlert itself is
+    /// wrapped: if the dialog can't show, there is no deeper fallback.</summary>
+    async Task SayPickAsync(string msg)
+    {
+        try { await DisplayAlert("Element picker", msg, "OK"); } catch { }
     }
 
     /// <summary>Mock-style hover fill for menu rows (transparent buttons show

@@ -259,7 +259,11 @@
     window.addEventListener("resize", onScroll, true);
   }
 
-  window.HomeDeckPick = { start: start, cancel: cancel };
+  window.HomeDeckPick = {
+    start: start,
+    cancel: cancel,
+    isActive: function () { return active; }
+  };
 
   // Remove-mode rules: delete matching nodes on every load. Selector lists
   // come from the shell (per-host). Runs at injection + once late for

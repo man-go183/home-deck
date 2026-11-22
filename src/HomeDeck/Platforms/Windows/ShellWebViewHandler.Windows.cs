@@ -13,12 +13,45 @@ namespace HomeDeck.Handlers;
 public partial class ShellWebViewHandler
 {
     AdBlockService? _ads;
+    Microsoft.UI.Xaml.Controls.WebView2? _wv;
 
     protected override void ConnectHandler(Microsoft.UI.Xaml.Controls.WebView2 platformView)
     {
         base.ConnectHandler(platformView);
+        _wv = platformView;
         _ads = MauiContext?.Services.GetService<AdBlockService>();
         _ = InitAsync(platformView, (ShellWebView)VirtualView);
+    }
+
+    protected override void DisconnectHandler(Microsoft.UI.Xaml.Controls.WebView2 platformView)
+    {
+        if (_wv == platformView) _wv = null;
+        base.DisconnectHandler(platformView);
+    }
+
+    /// <summary>null = engine ready, else "fail: …".</summary>
+    partial async Task<string?> EnsureEngineAsync()
+    {
+        var wv = _wv;
+        if (wv == null) return "fail: view: no page view yet (open a profile first).";
+        try { await wv.EnsureCoreWebView2Async(); return null; }
+        catch (Exception e) { return "fail: engine: browser engine not ready (" + e.GetType().Name + ": " + Trunc(e.Message) + ")."; }
+    }
+
+    /// <summary>Raw script eval (bypasses the MAUI wrapper). Never throws:
+    /// channel errors come back as THROW:/TIMEOUT.</summary>
+    partial async Task<string> EvalJsAsync(string js)
+    {
+        var wv = _wv;
+        if (wv == null) return "THROW:NoView";
+        try
+        {
+            var task = wv.ExecuteScriptAsync(js).AsTask();
+            var winner = await Task.WhenAny(task, Task.Delay(10000));
+            if (winner != task) return "TIMEOUT:eval exceeded 10s";
+            return await task;
+        }
+        catch (Exception e) { return "THROW:" + e.GetType().Name + ":" + Trunc(e.Message); }
     }
 
     async Task InitAsync(Microsoft.UI.Xaml.Controls.WebView2 wv, ShellWebView view)
