@@ -1,3 +1,4 @@
+using System.Linq;
 using System.Runtime.InteropServices.WindowsRuntime;
 using System.Text.Json;
 using HomeDeck;
@@ -15,6 +16,10 @@ public partial class ShellWebViewHandler
     AdBlockService? _ads;
     Microsoft.UI.Xaml.Controls.WebView2? _wv;
 
+    /// <summary>True when consumed: pick mode was armed and is now
+    /// cancelled. Wired by the page (it owns the armed flag).</summary>
+    public Func<bool>? PickEscPressed;
+
     protected override void ConnectHandler(Microsoft.UI.Xaml.Controls.WebView2 platformView)
     {
         base.ConnectHandler(platformView);
@@ -27,6 +32,20 @@ public partial class ShellWebViewHandler
     {
         if (_wv == platformView) _wv = null;
         base.DisconnectHandler(platformView);
+    }
+
+    /// <summary>Wait cursor over the page while arming (WinUI has no
+    /// MAUI-level cursor API). Restored by the caller in a finally.</summary>
+    public void SetWaitCursor(bool wait)
+    {
+        try
+        {
+            var wv = _wv;
+            if (wv == null) return;
+            wv.ChangeCursor(Microsoft.UI.Input.InputSystemCursor.Create(
+                wait ? Microsoft.UI.Input.InputSystemCursorShape.Wait : Microsoft.UI.Input.InputSystemCursorShape.Arrow));
+        }
+        catch { }
     }
 
     /// <summary>null = engine ready, else "fail: …".</summary>
@@ -68,17 +87,38 @@ public partial class ShellWebViewHandler
 
             core.AddWebResourceRequestedFilter("*", Microsoft.Web.WebView2.Core.CoreWebView2WebResourceContext.All);
             // Element picker reports (shell.js postMessage {type:"hd-pick"}).
+            // Accepts the object directly; a JSON string gets unwrapped too
+            // (WebMessageAsJson double-wraps posted strings — that silent
+            // mismatch once ate every report).
             core.WebMessageReceived += (s, e) =>
             {
                 try
                 {
                     using var doc = JsonDocument.Parse(e.WebMessageAsJson);
                     var root = doc.RootElement;
-                    if (root.TryGetProperty("type", out var t) && t.GetString() == "hd-pick")
+                    if (root.ValueKind == JsonValueKind.String)
+                    {
+                        try { using var inner = JsonDocument.Parse(root.GetString() ?? ""); root = inner.RootElement.Clone(); }
+                        catch { _ads?.NoteReportError("report: unreadable pick message (not JSON)"); return; }
+                    }
+                    if (root.ValueKind == JsonValueKind.Object
+                        && root.TryGetProperty("type", out var t) && t.GetString() == "hd-pick")
                         _ads?.ReportPickerPick(
                             root.TryGetProperty("host", out var h) ? h.GetString() ?? "" : "",
                             root.TryGetProperty("selector", out var x) ? x.GetString() ?? "" : "",
                             root.TryGetProperty("action", out var a) ? a.GetString() ?? "hide" : "hide");
+                    else _ads?.NoteReportError("report: unexpected pick message shape");
+                }
+                catch (Exception ex) { try { _ads?.NoteReportError("report: bad pick message (" + ex.GetType().Name + ")"); } catch { } }
+            };
+            // Window-level Esc: fires even when page focus is buried in an
+            // iframe (the page's own Esc listener never sees it then).
+            // Consumed only while the page says pick mode is armed.
+            core.AcceleratorKeyPressed += (s, e) =>
+            {
+                try
+                {
+                    if ((uint)e.VirtualKey == 0x1B && (PickEscPressed?.Invoke() == true)) e.Handled = true;
                 }
                 catch { }
             };
@@ -133,6 +173,26 @@ public partial class ShellWebViewHandler
         var css2 = ads.GetCosmeticCssForClasses(pageHost, string.Join(",", classes), string.Join(",", ids));
         if (!string.IsNullOrEmpty(css2) && css2 != css)
             await wv.ExecuteScriptAsync("var s=document.createElement('style');s.textContent=" + JsonSerializer.Serialize(css2) + ";document.documentElement.appendChild(s);");
+        CountCosmeticHidden(wv, view, ads, css, css2);
+    }
+
+    /// <summary>Count page elements matching the injected selectors (one
+    /// pass per load; capped). Fire-and-forget: a 0 on any failure.</summary>
+    static void CountCosmeticHidden(
+        Microsoft.UI.Xaml.Controls.WebView2 wv, ShellWebView view, AdBlockService ads, string css, string css2)
+    {
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                var set = new HashSet<string>(AdBlockService.CosmeticSelectors(css));
+                foreach (var s in AdBlockService.CosmeticSelectors(css2)) set.Add(s);
+                if (set.Count == 0) { view.SetCosmeticHidden(0); return; }
+                var raw = await wv.ExecuteScriptAsync("window.__hdCountMatches&&window.__hdCountMatches(" + JsonSerializer.Serialize(set.Take(300).ToArray()) + ")");
+                if (int.TryParse(raw, out int n)) view.SetCosmeticHidden(n);
+            }
+            catch { }
+        });
     }
 
     static string GuessType(string url, Microsoft.Web.WebView2.Core.CoreWebView2HttpRequestHeaders? headers)

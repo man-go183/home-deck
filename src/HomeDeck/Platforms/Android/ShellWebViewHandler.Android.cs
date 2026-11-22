@@ -105,6 +105,25 @@ public partial class ShellWebViewHandler
         var css2 = ads.GetCosmeticCssForClasses(pageHost, string.Join(",", classes), string.Join(",", ids));
         if (!string.IsNullOrEmpty(css2) && css2 != css)
             await v.EvaluateJavaScriptAsync("var s=document.createElement('style');s.textContent=" + JsonSerializer.Serialize(css2) + ";document.documentElement.appendChild(s);");
+        CountCosmeticHidden(v, ads, css, css2);
+    }
+
+    /// <summary>Count page elements matching the injected selectors (one
+    /// pass per load; capped). Fire-and-forget: a 0 on any failure.</summary>
+    static void CountCosmeticHidden(ShellWebView v, AdBlockService ads, string css, string css2)
+    {
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                var set = new HashSet<string>(AdBlockService.CosmeticSelectors(css));
+                foreach (var s in AdBlockService.CosmeticSelectors(css2)) set.Add(s);
+                if (set.Count == 0) { v.SetCosmeticHidden(0); return; }
+                var raw = await v.EvaluateJavaScriptAsync("window.__hdCountMatches&&window.__hdCountMatches(" + JsonSerializer.Serialize(set.Take(300).ToArray()) + ")");
+                if (int.TryParse(raw?.Trim('"'), out int n)) v.SetCosmeticHidden(n);
+            }
+            catch { }
+        });
     }
 
     sealed class ShellWebViewClient : WebViewClient

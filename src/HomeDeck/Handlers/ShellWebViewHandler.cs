@@ -9,36 +9,46 @@ public partial class ShellWebViewHandler : WebViewHandler
 {
     /// <summary>Arm the element picker, reporting every step. Returns "ok"
     /// or "fail: &lt;step&gt;: &lt;detail&gt;" — never throws, so the page
-    /// can show the exact failure instead of failing silent.</summary>
+    /// can show the exact failure instead of failing silent. One page
+    /// round-trip when the script is present, two when it must be injected.</summary>
     public async Task<string> StartPickerModeAsync()
     {
         var ready = await EnsureEngineAsync();
         if (ready != null) return ready;
-        var probe = await EvalJsAsync("typeof window.HomeDeckPick");
-        if (IsChanErr(probe))
-            return "fail: js-channel: the page did not answer the probe (" + probe + "). Scripts are not executing in this page.";
-        if (!probe.Contains("undefined"))
-            return await ArmAsync();
+        var first = await EvalJsAsync(ArmJs);
+        if (IsChanErr(first))
+            return "fail: js-channel: the page did not answer (" + first + "). Scripts are not executing in this page.";
+        if (!first.Contains("missing"))
+            return InterpretArm(first);
         var (text, readErr) = await ReadShellJsAsync();
         if (text == null)
             return "fail: package: could not read the pick script from the app package (" + readErr + "). Reinstall the app.";
         var inj = await EvalJsAsync(text);
         if (IsChanErr(inj))
             return "fail: inject: the page refused the script (" + inj + "). The page may block inline scripts.";
-        var probe2 = await EvalJsAsync("typeof window.HomeDeckPick");
-        if (probe2.Contains("undefined") || IsChanErr(probe2))
-            return "fail: inject: script ran but the pick module is still missing (" + probe2 + ").";
-        return await ArmAsync();
+        var second = await EvalJsAsync(ArmJs);
+        if (IsChanErr(second))
+            return "fail: js-channel: the page stopped answering after injection (" + second + ").";
+        if (second.Contains("missing"))
+            return "fail: inject: script ran but the pick module is still missing.";
+        return InterpretArm(second);
     }
 
-    async Task<string> ArmAsync()
+    /// <summary>Probe + start + verify in a single page call.</summary>
+    const string ArmJs = "(function(){try{if(!window.HomeDeckPick)return 'missing';window.HomeDeckPick.start();return window.HomeDeckPick.isActive()?'ok':'start-failed';}catch(e){return 'threw:'+((e&&e.message)||e);}})()";
+
+    static string InterpretArm(string r)
     {
-        var s = await EvalJsAsync("window.HomeDeckPick.start()");
-        if (IsChanErr(s))
-            return "fail: start: arming threw (" + s + "). The page may have redefined HomeDeckPick.";
-        var v = await EvalJsAsync("window.HomeDeckPick.isActive()");
-        if (v.Contains("true")) return "ok";
-        return "fail: verify: start() ran but pick mode did not engage (isActive=" + v + ").";
+        if (r.Contains("ok")) return "ok";
+        if (r.Contains("start-failed")) return "fail: verify: start() ran but pick mode did not engage.";
+        if (r.Contains("threw:")) return "fail: start: arming threw (" + Trunc(r, 200) + "). The page may have redefined HomeDeckPick.";
+        return "fail: verify: unexpected answer (" + Trunc(r, 120) + ").";
+    }
+
+    /// <summary>Fire-and-forget pick-mode exit (back button, Esc).</summary>
+    public void CancelPickerMode()
+    {
+        try { _ = EvalJsAsync("window.HomeDeckPick&&window.HomeDeckPick.cancel()"); } catch { }
     }
 
     static bool IsChanErr(string s) => s.StartsWith("THROW") || s == "TIMEOUT";

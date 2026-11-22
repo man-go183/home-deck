@@ -18,6 +18,7 @@ public partial class BrowserPage : ContentPage
     bool _navStarted;
     bool _updating;
     bool _lastUpdateFailed;
+    bool _pickArmed;
 #if ANDROID
     bool _titleViewSet;
 #endif
@@ -39,6 +40,11 @@ public partial class BrowserPage : ContentPage
         _store = store;
         _ads = ads;
         _ads.OnPickerReported = OnPickerReported;
+        Web.HandlerChanged += (_, _) =>
+        {
+            // Window-level Esc (fires even with focus buried in an iframe).
+            if (Web.Handler is ShellWebViewHandler hh) hh.PickEscPressed = OnPickEsc;
+        };
 
         Web.Navigating += (_, e) =>
         {
@@ -161,11 +167,13 @@ public partial class BrowserPage : ContentPage
                 _store.Prefs.PickerRules.Add(new PickerRule { Host = host, Selector = selector, Mode = mode });
                 _store.SavePrefs();
                 PushListsToAds();
+                Web.AddPickedHidden();
+                _ads.ClearReportError();
                 await _ads.ReloadFromCacheAsync();
             }
             if (AdsPanel.IsVisible) RebuildAdsPanel();
         }
-        catch { }
+        catch (Exception e) { try { _ads.NoteReportError("report: page save threw (" + e.GetType().Name + ")"); } catch { } }
     }
 
     async Task RemovePickerRuleAsync(string host, string selector)
@@ -190,6 +198,8 @@ public partial class BrowserPage : ContentPage
     {
         Web.Source = new UrlWebViewSource { Url = p.Url };
         Web.ResetBlockedCount();
+        Web.ResetHiddenCount();
+        _pickArmed = false;
         Splash.IsVisible = true;
         _navStarted = false;
         SplashStatus.Text = "Loading…";
@@ -291,6 +301,12 @@ public partial class BrowserPage : ContentPage
 
     protected override bool OnBackButtonPressed()
     {
+        if (_pickArmed)
+        {
+            _pickArmed = false;
+            if (Web.Handler is ShellWebViewHandler bh) bh.CancelPickerMode();
+            return true;
+        }
         if (AdsPanel.IsVisible) { CloseAdsPanel(); return true; }
         if (Drop.IsVisible) { Drop.IsVisible = false; return true; }
         if (Web.CanGoBack) { Web.GoBack(); return true; }
@@ -394,7 +410,7 @@ public partial class BrowserPage : ContentPage
                 // Subtitle-style proof row: smaller + fainter than menu text.
                 DropList.Children.Add(new Label
                 {
-                    Text = $"Blocked {Web.BlockedCount} on this page",
+                    Text = $"Blocked {Web.BlockedCount} · Hidden {Web.HiddenCount} on this page",
                     FontSize = 11,
                     TextColor = Color.FromRgba(242, 237, 232, 110),
                     Padding = new Thickness(10, 0, 10, 4),
@@ -402,18 +418,7 @@ public partial class BrowserPage : ContentPage
             }
             DropList.Children.Add(MenuDivider());
 
-            DropList.Children.Add(MenuButton("Hide element…", async () =>
-            {
-                Drop.IsVisible = false;
-                if (_profile == null) return;
-                string res = "fail: shell: no platform view (shell not attached)";
-                try
-                {
-                    if (Web.Handler is ShellWebViewHandler h) res = await h.StartPickerModeAsync();
-                }
-                catch (Exception e) { res = "fail: shell: arm call crashed (" + e.GetType().Name + ": " + e.Message + ")"; }
-                if (res != "ok") await SayPickAsync(res);
-            }));
+            DropList.Children.Add(MenuButton("Hide element…", async () => await ArmPickerAsync()));
             DropList.Children.Add(MenuDivider());
 
             DropList.Children.Add(MenuButton("Open in browser  ↗", async () =>
@@ -425,6 +430,39 @@ public partial class BrowserPage : ContentPage
                 }
             }));
         }
+    }
+
+    /// <summary>Arm the element picker with a wait cursor (Windows) and an
+    /// exact failure dialog. Shared by the menu entry and the panel button.</summary>
+    async Task ArmPickerAsync()
+    {
+        Drop.IsVisible = false;
+        if (AdsPanel.IsVisible) CloseAdsPanel();
+        if (_profile == null) return;
+#if WINDOWS
+        if (Web.Handler is ShellWebViewHandler cur0) cur0.SetWaitCursor(true);
+#endif
+        string res = "fail: shell: no platform view (shell not attached)";
+        try
+        {
+            _pickArmed = false;
+            if (Web.Handler is ShellWebViewHandler h) { res = await h.StartPickerModeAsync(); _pickArmed = res == "ok"; }
+        }
+        catch (Exception e) { _pickArmed = false; res = "fail: shell: arm call crashed (" + e.GetType().Name + ": " + e.Message + ")"; }
+#if WINDOWS
+        try { if (Web.Handler is ShellWebViewHandler cur1) cur1.SetWaitCursor(false); } catch { }
+#endif
+        if (res != "ok") await SayPickAsync(res);
+    }
+
+    /// <summary>Window-level Esc: consumed only while pick mode is armed
+    /// (the page's own Esc listener never fires with focus in an iframe).</summary>
+    bool OnPickEsc()
+    {
+        if (!_pickArmed) return false;
+        _pickArmed = false;
+        if (Web.Handler is ShellWebViewHandler h) h.CancelPickerMode();
+        return true;
     }
 
     /// <summary>Picker arm/report failure dialog. DisplayAlert itself is
@@ -507,7 +545,7 @@ public partial class BrowserPage : ContentPage
         AdsPanelBody.Children.Add(trow);
         AdsPanelBody.Children.Add(new Label
         {
-            Text = $"Blocked {Web.BlockedCount} on this page",
+            Text = $"Blocked {Web.BlockedCount} · Hidden {Web.HiddenCount} on this page",
             FontSize = 11,
             TextColor = Color.FromRgba(242, 237, 232, 110),
             Padding = new Thickness(10, 0, 10, 4),
@@ -589,15 +627,35 @@ public partial class BrowserPage : ContentPage
         AdsPanelBody.Children.Add(addErr);
         AdsPanelBody.Children.Add(addBtn);
         var picks = _store.Prefs.PickerRules;
-        if (picks.Count > 0)
+        AdsPanelBody.Children.Add(new Label
+        {
+            Text = "PICKED ELEMENTS",
+            FontSize = 11,
+            TextColor = dim,
+            Padding = new Thickness(10, 8, 10, 0),
+        });
+        if (!string.IsNullOrEmpty(_ads.LastReportError))
         {
             AdsPanelBody.Children.Add(new Label
             {
-                Text = "PICKED ELEMENTS",
+                Text = "Last save failed: " + _ads.LastReportError,
+                FontSize = 12,
+                TextColor = Color.FromArgb("#E14B32"),
+                Padding = new Thickness(10, 2, 10, 0),
+            });
+        }
+        if (picks.Count == 0)
+        {
+            AdsPanelBody.Children.Add(new Label
+            {
+                Text = "Nothing picked yet — Hide element… in the menu.",
                 FontSize = 11,
                 TextColor = dim,
-                Padding = new Thickness(10, 8, 10, 0),
+                Padding = new Thickness(10, 2, 10, 0),
             });
+        }
+        else
+        {
             foreach (var r in picks)
             {
                 string host = r.Host, selector = r.Selector;
@@ -634,6 +692,20 @@ public partial class BrowserPage : ContentPage
                 AdsPanelBody.Children.Add(prow);
             }
         }
+        var pickBtn = new Button
+        {
+            Text = "＋ Pick an element",
+            FontSize = 13,
+            CornerRadius = 8,
+            Padding = new Thickness(14, 7),
+            BackgroundColor = Colors.Transparent,
+            TextColor = dim,
+            BorderWidth = 1,
+            BorderColor = dim,
+            Margin = new Thickness(10, 6, 10, 0),
+        };
+        pickBtn.Clicked += async (_, _) => await ArmPickerAsync();
+        AdsPanelBody.Children.Add(pickBtn);
         var upd = new Button
         {
             Text = _updating ? "Updating…" : "Update now",

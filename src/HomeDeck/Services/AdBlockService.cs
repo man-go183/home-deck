@@ -61,17 +61,33 @@ public sealed class AdBlockService
     }
 
     /// <summary>Entry point for the platform JS bridges (any thread).
-    /// Sanitizes and forwards to <see cref="OnPickerReported"/>.</summary>
+    /// Sanitizes and forwards to <see cref="OnPickerReported"/>.
+    /// Failures are recorded in <see cref="LastReportError"/> — the report
+    /// path is fire-and-forget, so this is the only trace when it dies.</summary>
     public void ReportPickerPick(string host, string selector, string mode)
     {
         host = (host ?? "").Trim().ToLowerInvariant();
         selector = (selector ?? "").Trim();
         mode = mode == "remove" ? "remove" : "hide";
-        if (host.Length == 0 || host.Length > 253 || selector.Length == 0 || selector.Length > 500) return;
+        if (host.Length == 0 || host.Length > 253)
+        {
+            var h = host.Length > 60 ? host.Substring(0, 60) + "…" : host;
+            FailReport("report: rejected pick (bad host " + h + ")");
+            return;
+        }
+        if (selector.Length == 0 || selector.Length > 500)
+        {
+            FailReport("report: rejected pick (bad selector, len " + selector.Length + ")");
+            return;
+        }
         var cb = OnPickerReported;
-        if (cb == null) return;
-        try { MainThread.BeginInvokeOnMainThread(() => { try { cb(host, selector, mode); } catch { } }); }
-        catch { }
+        if (cb == null)
+        {
+            FailReport("report: no page is listening for picks");
+            return;
+        }
+        try { MainThread.BeginInvokeOnMainThread(() => { try { cb(host, selector, mode); } catch (Exception e) { FailReport("report: page save threw (" + e.GetType().Name + ")"); } }); }
+        catch (Exception e) { FailReport("report: could not reach UI thread (" + e.GetType().Name + ")"); }
     }
 
     /// <summary>Remove-mode selectors for a host, as a JSON array —
@@ -214,6 +230,39 @@ public sealed class AdBlockService
         all.AddRange(PickerRuleLines());
         if (RustFilterEngine.LoadAllRules(string.Join("\n", all)))
             _loadedAt = DateTime.UtcNow;
+    }
+
+    /// <summary>Last fire-and-forget failure (picker report or list load),
+    /// shown in the panel. Cleared on the next successful save.</summary>
+    public string? LastReportError { get; private set; }
+
+    public void ClearReportError() { LastReportError = null; }
+
+    public void NoteReportError(string err)
+    {
+        try { if (!string.IsNullOrEmpty(err)) LastReportError = err; } catch { }
+    }
+
+    void FailReport(string err) { try { LastReportError = err; } catch { } }
+
+    /// <summary>Selectors from engine CSS text (format:
+    /// sel1,sel2{display:none!important}). For the page-side match count.</summary>
+    public static IReadOnlyList<string> CosmeticSelectors(string css)
+    {
+        var res = new List<string>();
+        try
+        {
+            if (string.IsNullOrEmpty(css)) return res;
+            int brace = css.IndexOf('{');
+            if (brace < 0) return res;
+            foreach (var s in css.Substring(0, brace).Split(','))
+            {
+                var t = s.Trim();
+                if (t.Length > 0 && t.Length <= 300 && res.Count < 300) res.Add(t);
+            }
+        }
+        catch { }
+        return res;
     }
 
     /// <summary>Delete one list's cache file (custom-list removal).</summary>

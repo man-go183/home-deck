@@ -71,6 +71,18 @@
   window.dispatchEvent(new Event("homedeck:ready"));
 })();
 
+/* Hidden-element count for the shell's counter (one pass per load). */
+window.__hdCountMatches = function (list) {
+  var n = 0;
+  try {
+    if (!Array.isArray(list)) return 0;
+    for (var i = 0; i < list.length && i < 300; i++) {
+      try { n += document.querySelectorAll(list[i]).length; } catch (e) {}
+    }
+  } catch (e) {}
+  return n;
+};
+
 /* Element picker (hd/1 pick). window.HomeDeckPick.start() arms it:
  * tap/click an element to lock the gold striped highlight, then Hide
  * (hides instantly + reports host+selector to the shell for a saved
@@ -141,7 +153,7 @@
   function hideBar() { if (bar) bar.style.display = "none"; }
 
   function report(host, sel, action) {
-    var payload = JSON.stringify({ type: "hd-pick", host: host, selector: sel, action: action });
+    var payload = { type: "hd-pick", host: host, selector: sel, action: action };
     try {
       var n = window.HomeDeckNative ||
         (window.chrome && window.chrome.webview && window.chrome.webview.hostObjects && window.chrome.webview.hostObjects.HomeDeckNative);
@@ -151,6 +163,8 @@
       }
     } catch (e) {}
     try {
+      // Post the OBJECT: WebMessageAsJson double-wraps a posted string,
+      // which once made every report unparseable (and silent).
       if (window.chrome && window.chrome.webview && window.chrome.webview.postMessage) {
         window.chrome.webview.postMessage(payload);
         return true;
