@@ -140,15 +140,19 @@
 
   function hideBar() { if (bar) bar.style.display = "none"; }
 
-  function report(host, sel) {
+  function report(host, sel, action) {
+    var payload = JSON.stringify({ type: "hd-pick", host: host, selector: sel, action: action });
     try {
       var n = window.HomeDeckNative ||
         (window.chrome && window.chrome.webview && window.chrome.webview.hostObjects && window.chrome.webview.hostObjects.HomeDeckNative);
-      if (n && n.reportPicked) { n.reportPicked(host, sel); return true; }
+      if (n) {
+        if (action === "remove" && n.reportRemoved) { n.reportRemoved(host, sel); return true; }
+        if (action !== "remove" && n.reportPicked) { n.reportPicked(host, sel); return true; }
+      }
     } catch (e) {}
     try {
       if (window.chrome && window.chrome.webview && window.chrome.webview.postMessage) {
-        window.chrome.webview.postMessage(JSON.stringify({ type: "hd-pick", host: host, selector: sel }));
+        window.chrome.webview.postMessage(payload);
         return true;
       }
     } catch (e2) {}
@@ -167,7 +171,13 @@
     e.preventDefault();
     e.stopPropagation();
     var el = e.target;
-    if (el === document.documentElement) el = document.body;
+    if (el === document.documentElement || el === document.body) {
+      // Tapped empty page: clear the lock, keep picking.
+      locked = null;
+      if (overlay) overlay.style.display = "none";
+      hideBar();
+      return;
+    }
     locked = el;
     place(el);
     showBar(el);
@@ -181,8 +191,17 @@
     if (!locked) return;
     var sel = genSelector(locked);
     try { locked.style.setProperty("display", "none", "important"); } catch (e) {}
-    report(window.location.hostname || "", sel);
+    report(window.location.hostname || "", sel, "hide");
     barLabel.textContent = "Hidden ✓";
+    setTimeout(exit, 900);
+  }
+
+  function doRemove() {
+    if (!locked) return;
+    var sel = genSelector(locked);
+    try { locked.remove(); } catch (e) {}
+    report(window.location.hostname || "", sel, "remove");
+    barLabel.textContent = "Deleted ✓";
     setTimeout(exit, 900);
   }
 
@@ -222,11 +241,15 @@
     hide.textContent = "Hide";
     hide.style.cssText = "border:none;border-radius:8px;padding:6px 14px;background:" + GOLD + ";color:#161311;font-weight:700;font-size:13px;";
     hide.addEventListener("click", function (e) { e.stopPropagation(); doHide(); });
+    var del = document.createElement("button");
+    del.textContent = "Delete";
+    del.style.cssText = "border:1px solid " + GOLD + ";border-radius:8px;padding:6px 14px;background:transparent;color:" + GOLD + ";font-size:13px;";
+    del.addEventListener("click", function (e) { e.stopPropagation(); doRemove(); });
     var no = document.createElement("button");
     no.textContent = "Cancel";
     no.style.cssText = "border:1px solid #8a8272;border-radius:8px;padding:6px 14px;background:transparent;color:#fff;font-size:13px;";
     no.addEventListener("click", function (e) { e.stopPropagation(); cancel(); });
-    bar.appendChild(barLabel); bar.appendChild(hide); bar.appendChild(no);
+    bar.appendChild(barLabel); bar.appendChild(hide); bar.appendChild(del); bar.appendChild(no);
     document.documentElement.appendChild(overlay);
     document.documentElement.appendChild(bar);
     document.addEventListener("click", onTap, true);
@@ -237,4 +260,34 @@
   }
 
   window.HomeDeckPick = { start: start, cancel: cancel };
+
+  // Remove-mode rules: delete matching nodes on every load. Selector lists
+  // come from the shell (per-host). Runs at injection + once late for
+  // slow-building pages. Main document only, v1.
+  function applyRemovals() {
+    try {
+      var host = window.location.hostname || "";
+      if (!host) return;
+      var n = window.HomeDeckNative ||
+        (window.chrome && window.chrome.webview && window.chrome.webview.hostObjects && window.chrome.webview.hostObjects.HomeDeckNative);
+      if (!n || !n.getRemoveSelectors) return;
+      var list = JSON.parse(n.getRemoveSelectors(host) || "[]");
+      if (!Array.isArray(list)) return;
+      list.forEach(function (sel) {
+        try {
+          var els = document.querySelectorAll(sel);
+          for (var i = 0; i < els.length; i++) {
+            if (!els[i].closest("[data-hd-pick]")) els[i].remove();
+          }
+        } catch (e) {}
+      });
+    } catch (e) {}
+  }
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", function () { applyRemovals(); setTimeout(applyRemovals, 2000); });
+  } else {
+    applyRemovals();
+    setTimeout(applyRemovals, 2000);
+  }
 })();

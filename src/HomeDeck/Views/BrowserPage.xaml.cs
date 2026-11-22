@@ -148,16 +148,16 @@ public partial class BrowserPage : ContentPage
         => _ads.ApplyConfig(_store.Prefs.DisabledLists, _store.Prefs.CustomLists, _store.Prefs.PickerRules);
 
     /// <summary>Picked element reported by page JS: save the per-site rule
-    /// and rebuild the engine (lists from cache + rules). The element is
-    /// already hidden live in the page by the picker overlay.</summary>
-    async void OnPickerReported(string host, string selector)
+    /// (hide or remove mode) and rebuild the engine. The element is
+    /// already hidden/deleted live in the page by the picker overlay.</summary>
+    async void OnPickerReported(string host, string selector, string mode)
     {
         try
         {
             if (!_store.Prefs.PickerRules.Any(r => r.Host == host && r.Selector == selector))
             {
                 if (_store.Prefs.PickerRules.Count >= 500) return;
-                _store.Prefs.PickerRules.Add(new PickerRule { Host = host, Selector = selector });
+                _store.Prefs.PickerRules.Add(new PickerRule { Host = host, Selector = selector, Mode = mode });
                 _store.SavePrefs();
                 PushListsToAds();
                 await _ads.ReloadFromCacheAsync();
@@ -588,6 +588,7 @@ public partial class BrowserPage : ContentPage
             {
                 string host = r.Host, selector = r.Selector;
                 string shown = selector.Length > 80 ? selector.Substring(0, 80) + "…" : selector;
+                if (r.Mode == "remove") shown += " · removed";
                 var texts = new VerticalStackLayout
                 {
                     Spacing = 0,

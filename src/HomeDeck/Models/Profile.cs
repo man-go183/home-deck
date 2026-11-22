@@ -57,9 +57,11 @@ public sealed class CustomList
     public bool Enabled { get; set; } = true;
 }
 
-/// <summary>An element the user picked to hide (per-site cosmetic rule).</summary>
+/// <summary>An element the user picked to hide/remove (per-site rule).</summary>
 public sealed class PickerRule
 {
     public string Host { get; set; } = "";
     public string Selector { get; set; } = "";
+    /// <summary>"hide" (CSS, default) or "remove" (node deleted on load).</summary>
+    public string Mode { get; set; } = "hide";
 }

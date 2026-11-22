@@ -12,9 +12,18 @@ namespace HomeDeck;
 [ClassInterface(ClassInterfaceType.AutoDual)]
 public class HomeDeckHostObject
 {
-    Action<string> _post;
+    readonly Action<string> _post;
+    readonly AdBlockService? _ads;
 
-    public HomeDeckHostObject(Action<string> post) { _post = post; }
+    public HomeDeckHostObject(Action<string> post, AdBlockService? ads) { _post = post; _ads = ads; }
+
+    /// <summary>Sync answer to page JS: remove-mode selectors for a host
+    /// (JSON array). Called at page load by shell.js.</summary>
+    public string getRemoveSelectors(string host)
+    {
+        try { return _ads?.GetRemoveSelectorsJson(host) ?? "[]"; }
+        catch { return "[]"; }
+    }
 
     public string getBattery() => DeviceBridge.GetBattery();
     public string getNetwork() => DeviceBridge.GetNetwork();

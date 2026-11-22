@@ -39,13 +39,28 @@ class HomeDeckJsBridge : Java.Lang.Object
     [Android.Webkit.JavascriptInterface, Java.Interop.Export("getDevice")] public string GetDevice() => DeviceBridge.GetDevice();
     [Android.Webkit.JavascriptInterface, Java.Interop.Export("vibrate")] public string Vibrate(int millis) => DeviceBridge.Vibrate(millis);
 
-    /// <summary>Element picker report (fire-and-forget): page JS calls
-    /// HomeDeckNative.reportPicked(host, selector). Runs on a Java bridge
-    /// thread — never touches the view; AdBlockService marshals onward.</summary>
+    /// <summary>Element picker reports (fire-and-forget): page JS calls
+    /// HomeDeckNative.reportPicked/reportRemoved(host, selector). Runs on a
+    /// Java bridge thread — never touches the view; AdBlockService
+    /// marshals onward.</summary>
     [Android.Webkit.JavascriptInterface, Java.Interop.Export("reportPicked")]
     public void ReportPicked(string host, string selector)
     {
-        try { _ads.ReportPickerPick(host, selector); } catch { }
+        try { _ads.ReportPickerPick(host, selector, "hide"); } catch { }
+    }
+
+    [Android.Webkit.JavascriptInterface, Java.Interop.Export("reportRemoved")]
+    public void ReportRemoved(string host, string selector)
+    {
+        try { _ads.ReportPickerPick(host, selector, "remove"); } catch { }
+    }
+
+    /// <summary>Sync answer to page JS: remove-mode selectors for a host
+    /// (JSON array). Called at page load by shell.js.</summary>
+    [Android.Webkit.JavascriptInterface, Java.Interop.Export("getRemoveSelectors")]
+    public string GetRemoveSelectors(string host)
+    {
+        try { return _ads.GetRemoveSelectorsJson(host); } catch { return "[]"; }
     }
 
     [Android.Webkit.JavascriptInterface, Java.Interop.Export("shareText")]

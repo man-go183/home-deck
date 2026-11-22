@@ -1,6 +1,7 @@
 using HomeDeck.Models;
 using Microsoft.Maui.ApplicationModel;
 using Microsoft.Maui.Storage;
+using System.Text.Json;
 
 namespace HomeDeck.Services;
 
@@ -44,9 +45,9 @@ public sealed class AdBlockService
     List<PickerRule> _pickers = new();
 
     /// <summary>Fired on the UI thread when page JS reports a picked
-    /// element (host, selector). The page owns prefs: it saves, pushes
-    /// config back, and rebuilds the engine.</summary>
-    public Action<string, string>? OnPickerReported;
+    /// element (host, selector, mode). The page owns prefs: it saves,
+    /// pushes config back, and rebuilds the engine.</summary>
+    public Action<string, string, string>? OnPickerReported;
 
     /// <summary>Push the user's list config (page owns prefs, service
     /// owns loading). Must be called before any load.</summary>
@@ -56,30 +57,49 @@ public sealed class AdBlockService
         _customs = (customs ?? Enumerable.Empty<CustomList>())
             .Select(c => new CustomList { Name = c.Name, Url = c.Url, Enabled = c.Enabled }).ToList();
         _pickers = (pickers ?? Enumerable.Empty<PickerRule>())
-            .Select(r => new PickerRule { Host = r.Host, Selector = r.Selector }).Take(500).ToList();
+            .Select(r => new PickerRule { Host = r.Host, Selector = r.Selector, Mode = (r.Mode ?? "hide") == "remove" ? "remove" : "hide" }).Take(500).ToList();
     }
 
     /// <summary>Entry point for the platform JS bridges (any thread).
     /// Sanitizes and forwards to <see cref="OnPickerReported"/>.</summary>
-    public void ReportPickerPick(string host, string selector)
+    public void ReportPickerPick(string host, string selector, string mode)
     {
         host = (host ?? "").Trim().ToLowerInvariant();
         selector = (selector ?? "").Trim();
+        mode = mode == "remove" ? "remove" : "hide";
         if (host.Length == 0 || host.Length > 253 || selector.Length == 0 || selector.Length > 500) return;
         var cb = OnPickerReported;
         if (cb == null) return;
-        try { MainThread.BeginInvokeOnMainThread(() => { try { cb(host, selector); } catch { } }); }
+        try { MainThread.BeginInvokeOnMainThread(() => { try { cb(host, selector, mode); } catch { } }); }
         catch { }
     }
 
-    /// <summary>Picked-element rules as filter text (host##selector).</summary>
+    /// <summary>Remove-mode selectors for a host, as a JSON array —
+    /// answered synchronously to page JS, which deletes matches on load.</summary>
+    public string GetRemoveSelectorsJson(string host)
+    {
+        try
+        {
+            host = (host ?? "").Trim().ToLowerInvariant();
+            if (host.Length == 0) return "[]";
+            var list = _pickers
+                .Where(r => (r.Host ?? "").Trim().ToLowerInvariant() == host
+                    && r.Mode == "remove" && !string.IsNullOrWhiteSpace(r.Selector))
+                .Select(r => r.Selector.Trim()).Take(500).ToList();
+            return JsonSerializer.Serialize(list);
+        }
+        catch { return "[]"; }
+    }
+
+    /// <summary>Hide-mode picked rules as filter text (host##selector).
+    /// Remove-mode rules never enter the engine — page JS deletes them.</summary>
     IEnumerable<string> PickerRuleLines()
     {
         foreach (var r in _pickers)
         {
             var h = (r.Host ?? "").Trim().ToLowerInvariant();
             var s = (r.Selector ?? "").Trim();
-            if (h.Length > 0 && s.Length > 0 && s.Length <= 500) yield return h + "##" + s;
+            if (h.Length > 0 && s.Length > 0 && s.Length <= 500 && r.Mode != "remove") yield return h + "##" + s;
         }
     }
 

@@ -31,7 +31,7 @@ public partial class ShellWebViewHandler
             core.AddHostObjectToScript("HomeDeckNative",
                 new HomeDeckHostObject(msg =>
                     MainThread.BeginInvokeOnMainThread(
-                        () => { _ = wv.ExecuteScriptAsync($"window.__hdResolveMsg({msg})"); })));
+                        () => { _ = wv.ExecuteScriptAsync($"window.__hdResolveMsg({msg})"); }), _ads));
 
             core.AddWebResourceRequestedFilter("*", Microsoft.Web.WebView2.Core.CoreWebView2WebResourceContext.All);
             // Element picker reports (shell.js postMessage {type:"hd-pick"}).
@@ -44,7 +44,8 @@ public partial class ShellWebViewHandler
                     if (root.TryGetProperty("type", out var t) && t.GetString() == "hd-pick")
                         _ads?.ReportPickerPick(
                             root.TryGetProperty("host", out var h) ? h.GetString() ?? "" : "",
-                            root.TryGetProperty("selector", out var x) ? x.GetString() ?? "" : "");
+                            root.TryGetProperty("selector", out var x) ? x.GetString() ?? "" : "",
+                            root.TryGetProperty("action", out var a) ? a.GetString() ?? "hide" : "hide");
                 }
                 catch { }
             };
