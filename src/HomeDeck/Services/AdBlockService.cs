@@ -105,11 +105,19 @@ public sealed class AdBlockService
                 if (info.Exists && !force && (DateTime.UtcNow - info.LastWriteTimeUtc).TotalDays < days)
                 {
                     text = await File.ReadAllTextAsync(path);
+                    if (!LooksLikeList(text))
+                    {
+                        // Poisoned cache (e.g. a portal/parked page saved as a
+                        // "list"): drop it and treat the list as undownloaded.
+                        try { File.Delete(path); } catch { }
+                        text = null;
+                        info = new FileInfo(path);
+                    }
                 }
-                else
+                if (text == null)
                 {
-                    string fresh = await _http.GetStringAsync(list.Url);
-                    if (HasRules(fresh))
+                    string fresh = await DownloadListAsync(list.Url);
+                    if (LooksLikeList(fresh))
                     {
                         await File.WriteAllTextAsync(path, fresh);
                         text = fresh;
@@ -117,13 +125,14 @@ public sealed class AdBlockService
                     else if (info.Exists)
                     {
                         // Upstream stubbed/emptied (brave-unbreak shrank to one
-                        // comment line): keep the stale copy, never poison the
-                        // cache with an empty download.
-                        text = await File.ReadAllTextAsync(path);
+                        // comment line) or returned junk: keep the stale copy,
+                        // never poison the cache with a bad download.
+                        var stale = await File.ReadAllTextAsync(path);
+                        if (LooksLikeList(stale)) text = stale;
                     }
                     // else: no cache and nothing usable upstream — skip, fail open.
                 }
-                if (!string.IsNullOrEmpty(text) && HasRules(text))
+                if (LooksLikeList(text))
                     all.Add(text);
             }
             catch { /* stale cache or nothing; keep going */ }
@@ -144,7 +153,7 @@ public sealed class AdBlockService
             {
                 var text = await File.ReadAllTextAsync(
                     Path.Combine(FileSystem.AppDataDirectory, list.Key + ".txt"));
-                if (HasRules(text)) all.Add(text);
+                if (LooksLikeList(text)) all.Add(text);
             }
             catch { }
         }
@@ -158,9 +167,29 @@ public sealed class AdBlockService
         try { File.Delete(Path.Combine(FileSystem.AppDataDirectory, key + ".txt")); } catch { }
     }
 
-    /// <summary>True when filter text holds at least one real rule: a
-    /// non-blank line that isn't a <c>!</c> comment or a
-    /// <c>[section]</c> header.</summary>
+    /// <summary>Download list text. Rejects HTML responses (parked
+    /// domains, captive portals and ISP hijacks serve pages for any URL —
+    /// a 404-page must never become a "filter list"). Throws on HTTP or
+    /// content errors so callers keep the stale cache.</summary>
+    async Task<string> DownloadListAsync(string url)
+    {
+        using var resp = await _http.GetAsync(url);
+        resp.EnsureSuccessStatusCode();
+        var mt = resp.Content.Headers.ContentType?.MediaType;
+        if (mt != null && mt.Contains("html", StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("HTML response, not a filter list");
+        return await resp.Content.ReadAsStringAsync();
+    }
+
+    /// <summary>True when text plausibly is a filter list: holds at least
+    /// one real rule and isn't a saved HTML page.</summary>
+    static bool LooksLikeList(string? text)
+    {
+        if (string.IsNullOrEmpty(text)) return false;
+        var t = text.TrimStart();
+        if (t.StartsWith("<", StringComparison.Ordinal)) return false;
+        return HasRules(text);
+    }
     static bool HasRules(string text)
     {
         foreach (var line in text.Split('\n'))
