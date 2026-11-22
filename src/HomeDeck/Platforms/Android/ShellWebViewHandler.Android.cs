@@ -56,7 +56,7 @@ public partial class ShellWebViewHandler
     }
 
     /// <summary>null = engine ready, else "fail: …".</summary>
-    partial Task<string?> EnsureEngineAsync()
+    private partial Task<string?> EnsureEngineAsync()
     {
         if (_wv == null) return Task.FromResult<string?>("fail: view: no page view yet (open a profile first).");
         return Task.FromResult<string?>(null);
@@ -74,7 +74,7 @@ public partial class ShellWebViewHandler
 
     /// <summary>Raw script eval (bypasses the MAUI wrapper). Never throws:
     /// channel errors come back as THROW:/TIMEOUT.</summary>
-    partial async Task<string> EvalJsAsync(string js)
+    private partial async Task<string> EvalJsAsync(string js)
     {
         var wv = _wv;
         if (wv == null) return "THROW:NoView";

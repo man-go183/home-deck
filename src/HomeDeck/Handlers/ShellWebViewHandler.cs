@@ -58,6 +58,6 @@ public partial class ShellWebViewHandler : WebViewHandler
     }
 
     // Per-platform primitives (never throw; channel errors as THROW:/TIMEOUT).
-    partial Task<string?> EnsureEngineAsync();
-    partial Task<string> EvalJsAsync(string js);
+    private partial Task<string?> EnsureEngineAsync();
+    private partial Task<string> EvalJsAsync(string js);
 }
