@@ -1,3 +1,4 @@
+using HomeDeck.Models;
 using Microsoft.Maui.Storage;
 
 namespace HomeDeck.Services;
@@ -5,10 +6,11 @@ namespace HomeDeck.Services;
 /// <summary>
 /// Per-profile ad &amp; tracker blocking, decided by Brave's adblock-rust
 /// (via <see cref="RustFilterEngine"/> + the hdblock native library) and
-/// enforced at the WebView request layer on each platform. Same three lists
-/// Brave uses (EasyList, EasyPrivacy, Brave Unbreak), refreshed from the
-/// network with a 7-day on-device cache. Without the native library (or
-/// before lists load) blocking is off and everything loads — fail open.
+/// enforced at the WebView request layer on each platform. Same sources
+/// Brave uses (EasyList, EasyPrivacy, Brave Specific, Brave First-Party),
+/// refreshed from the network with an on-device cache. Without the native
+/// library (or before lists load) blocking is off and everything loads —
+/// fail open.
 /// </summary>
 public sealed class AdBlockService
 {
@@ -28,12 +30,58 @@ public sealed class AdBlockService
     {
         new("easylist", "https://easylist.to/easylist/easylist.txt"),
         new("easyprivacy", "https://easylist.to/easylist/easyprivacy.txt"),
-        new("brave-unbreak", "https://raw.githubusercontent.com/brave/adblock-lists/master/brave-lists/brave-unbreak.txt"),
+        new("brave-specific", "https://raw.githubusercontent.com/brave/adblock-lists/master/brave-lists/brave-specific.txt"),
+        new("brave-firstparty", "https://raw.githubusercontent.com/brave/adblock-lists/master/brave-lists/brave-firstparty.txt"),
     };
 
     readonly HttpClient _http = new();
     readonly RustFilterEngine _engine = new();
     DateTime _loadedAt = DateTime.MinValue;
+
+    HashSet<string> _disabled = new(StringComparer.OrdinalIgnoreCase);
+    List<CustomList> _customs = new();
+
+    /// <summary>Push the user's list config (page owns prefs, service
+    /// owns loading). Must be called before any load.</summary>
+    public void ApplyConfig(IEnumerable<string>? disabled, IEnumerable<CustomList>? customs)
+    {
+        _disabled = new HashSet<string>(disabled ?? Enumerable.Empty<string>(), StringComparer.OrdinalIgnoreCase);
+        _customs = (customs ?? Enumerable.Empty<CustomList>())
+            .Select(c => new CustomList { Name = c.Name, Url = c.Url, Enabled = c.Enabled }).ToList();
+    }
+
+    /// <summary>One loadable list: built-in or custom.</summary>
+    sealed class ActiveSource
+    {
+        public string Name = "";
+        public string Key = "";
+        public string Url = "";
+        public bool Enabled = true;
+        public bool IsCustom;
+    }
+
+    /// <summary>Filesystem-safe cache key for a list name.</summary>
+    public static string CacheKey(string name)
+    {
+        var s = new string(name.Trim().ToLowerInvariant()
+            .Select(ch => char.IsLetterOrDigit(ch) || ch is '-' or '_' ? ch : '_').ToArray()).Trim('_');
+        return s.Length == 0 ? "custom" : s;
+    }
+
+    List<ActiveSource> AllSources()
+    {
+        var res = DefaultLists
+            .Select(l => new ActiveSource { Name = l.Name, Key = CacheKey(l.Name), Url = l.Url, Enabled = !_disabled.Contains(l.Name) })
+            .ToList();
+        var seen = new HashSet<string>(res.Select(r => r.Key));
+        foreach (var c in _customs)
+        {
+            var key = CacheKey(c.Name);
+            if (!seen.Add(key)) continue; // blank or collides — page validates, belt-and-braces
+            res.Add(new ActiveSource { Name = c.Name, Key = key, Url = c.Url, Enabled = c.Enabled, IsCustom = true });
+        }
+        return res;
+    }
 
     /// <summary>List refresh cadence in days (global pref, default 7).</summary>
     public int RefreshDays { get; set; } = 7;
@@ -44,13 +92,15 @@ public sealed class AdBlockService
     {
         int days = Math.Max(1, RefreshDays);
         if (!force && (DateTime.UtcNow - _loadedAt).TotalDays < days && Ready) return;
+        DropRetiredCaches();
         var all = new List<string>();
-        foreach (var list in DefaultLists)
+        foreach (var list in AllSources())
         {
+            if (!list.Enabled) continue; // switched off: keep cache, exclude from engine
             try
             {
-                var path = Path.Combine(FileSystem.AppDataDirectory, list.Name + ".txt");
-                string text;
+                var path = Path.Combine(FileSystem.AppDataDirectory, list.Key + ".txt");
+                string? text = null;
                 var info = new FileInfo(path);
                 if (info.Exists && !force && (DateTime.UtcNow - info.LastWriteTimeUtc).TotalDays < days)
                 {
@@ -58,15 +108,83 @@ public sealed class AdBlockService
                 }
                 else
                 {
-                    text = await _http.GetStringAsync(list.Url);
-                    await File.WriteAllTextAsync(path, text);
+                    string fresh = await _http.GetStringAsync(list.Url);
+                    if (HasRules(fresh))
+                    {
+                        await File.WriteAllTextAsync(path, fresh);
+                        text = fresh;
+                    }
+                    else if (info.Exists)
+                    {
+                        // Upstream stubbed/emptied (brave-unbreak shrank to one
+                        // comment line): keep the stale copy, never poison the
+                        // cache with an empty download.
+                        text = await File.ReadAllTextAsync(path);
+                    }
+                    // else: no cache and nothing usable upstream — skip, fail open.
                 }
-                all.Add(text);
+                if (!string.IsNullOrEmpty(text) && HasRules(text))
+                    all.Add(text);
             }
             catch { /* stale cache or nothing; keep going */ }
         }
         if (all.Count > 0 && RustFilterEngine.LoadAllRules(string.Join("\n", all)))
             _loadedAt = DateTime.UtcNow;
+    }
+
+    /// <summary>Rebuild the engine from on-disk caches only (no network):
+    /// instant apply after a list is toggled. Empty set clears the engine.</summary>
+    public async Task ReloadFromCacheAsync()
+    {
+        var all = new List<string>();
+        foreach (var list in AllSources())
+        {
+            if (!list.Enabled) continue;
+            try
+            {
+                var text = await File.ReadAllTextAsync(
+                    Path.Combine(FileSystem.AppDataDirectory, list.Key + ".txt"));
+                if (HasRules(text)) all.Add(text);
+            }
+            catch { }
+        }
+        if (RustFilterEngine.LoadAllRules(string.Join("\n", all)))
+            _loadedAt = DateTime.UtcNow;
+    }
+
+    /// <summary>Delete one list's cache file (custom-list removal).</summary>
+    public void DeleteCacheFor(string key)
+    {
+        try { File.Delete(Path.Combine(FileSystem.AppDataDirectory, key + ".txt")); } catch { }
+    }
+
+    /// <summary>True when filter text holds at least one real rule: a
+    /// non-blank line that isn't a <c>!</c> comment or a
+    /// <c>[section]</c> header.</summary>
+    static bool HasRules(string text)
+    {
+        foreach (var line in text.Split('\n'))
+        {
+            var t = line.Trim();
+            if (t.Length > 0 && t[0] != '!' && t[0] != '[') return true;
+        }
+        return false;
+    }
+
+    /// <summary>Delete cache files for lists no longer configured
+    /// (retired built-ins, removed customs). Disabled-but-kept lists are
+    /// configured, so their caches survive. Avatars live in a subfolder;
+    /// nothing else stores .txt at the root.</summary>
+    void DropRetiredCaches()
+    {
+        try
+        {
+            var keep = new HashSet<string>(AllSources().Select(l => l.Key + ".txt"));
+            foreach (var f in Directory.GetFiles(FileSystem.AppDataDirectory, "*.txt"))
+                if (!keep.Contains(Path.GetFileName(f)))
+                    try { File.Delete(f); } catch { }
+        }
+        catch { }
     }
 
     public bool ShouldBlock(string url, string pageHost, string resourceType)
@@ -140,25 +258,29 @@ public sealed class AdBlockService
         public DateTime? UpdatedUtc { get; set; }
         public long Bytes { get; set; }
         public bool HasCache => Bytes > 0;
+        public bool Enabled { get; set; } = true;
+        public bool IsCustom { get; set; }
     }
 
     public IReadOnlyList<ListStatus> GetListStatus()
     {
         var res = new List<ListStatus>();
-        foreach (var list in DefaultLists)
+        foreach (var list in AllSources())
         {
             try
             {
-                var path = Path.Combine(FileSystem.AppDataDirectory, list.Name + ".txt");
+                var path = Path.Combine(FileSystem.AppDataDirectory, list.Key + ".txt");
                 var info = new FileInfo(path);
                 res.Add(new ListStatus
                 {
                     Name = list.Name,
                     UpdatedUtc = info.Exists ? info.LastWriteTimeUtc : null,
                     Bytes = info.Exists ? info.Length : 0,
+                    Enabled = list.Enabled,
+                    IsCustom = list.IsCustom,
                 });
             }
-            catch { res.Add(new ListStatus { Name = list.Name }); }
+            catch { res.Add(new ListStatus { Name = list.Name, Enabled = list.Enabled, IsCustom = list.IsCustom }); }
         }
         return res;
     }

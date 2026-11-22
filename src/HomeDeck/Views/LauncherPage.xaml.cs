@@ -89,6 +89,7 @@ public partial class LauncherPage : ContentPage
         // they're ready before any tap. Fail-safe inside; never blocks UI.
         await _store.LoadAsync();
         _ads.RefreshDays = _store.Prefs.ListRefreshDays;
+        _ads.ApplyConfig(_store.Prefs.DisabledLists, _store.Prefs.CustomLists);
         _ = _ads.EnsureLoadedAsync();
         AskChk.IsChecked = _store.Prefs.AskEveryTime;
         BuildCards();

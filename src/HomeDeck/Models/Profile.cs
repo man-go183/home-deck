@@ -38,4 +38,18 @@ public sealed class ShellPrefs
     public bool AskEveryTime { get; set; } = true;
     public string? LastProfileId { get; set; }
     public int ListRefreshDays { get; set; } = 7;
+
+    /// <summary>Built-in list names the user switched off (kept, not loaded).</summary>
+    public List<string> DisabledLists { get; set; } = new();
+
+    /// <summary>User-added filter lists (global, like the built-ins).</summary>
+    public List<CustomList> CustomLists { get; set; } = new();
+}
+
+/// <summary>A user-added filter list (global, like the built-ins).</summary>
+public sealed class CustomList
+{
+    public string Name { get; set; } = "";
+    public string Url { get; set; } = "";
+    public bool Enabled { get; set; } = true;
 }

@@ -138,8 +138,13 @@ public partial class BrowserPage : ContentPage
         _store.Prefs.LastProfileId = p.Id;
         _store.SavePrefs();
         _ads.RefreshDays = _store.Prefs.ListRefreshDays;
+        PushListsToAds();
         _ = _ads.EnsureLoadedAsync();
     }
+
+    /// <summary>Push the user's list config (prefs) into the loader.</summary>
+    void PushListsToAds()
+        => _ads.ApplyConfig(_store.Prefs.DisabledLists, _store.Prefs.CustomLists);
 
     void SyncShield(Profile p)
     {
@@ -482,6 +487,54 @@ public partial class BrowserPage : ContentPage
             Padding = new Thickness(4),
             Content = listScroll,
         });
+        AdsPanelBody.Children.Add(new Label
+        {
+            Text = "CUSTOM LISTS",
+            FontSize = 11,
+            TextColor = dim,
+            Padding = new Thickness(10, 8, 10, 0),
+        });
+        var nameEntry = new Entry
+        {
+            Placeholder = "Name (e.g. my-filters)",
+            TextColor = Colors.White,
+            PlaceholderColor = dim,
+            FontSize = 13,
+            Margin = new Thickness(10, 2, 10, 0),
+        };
+        var urlEntry = new Entry
+        {
+            Placeholder = "https://…/list.txt",
+            TextColor = Colors.White,
+            PlaceholderColor = dim,
+            FontSize = 13,
+            Keyboard = Keyboard.Url,
+            Margin = new Thickness(10, 2, 10, 0),
+        };
+        var addErr = new Label
+        {
+            FontSize = 12,
+            TextColor = Color.FromArgb("#E14B32"),
+            IsVisible = false,
+            Padding = new Thickness(10, 2, 10, 0),
+        };
+        var addBtn = new Button
+        {
+            Text = "Add list",
+            FontSize = 13,
+            CornerRadius = 8,
+            Padding = new Thickness(14, 7),
+            BackgroundColor = Colors.Transparent,
+            TextColor = dim,
+            BorderWidth = 1,
+            BorderColor = dim,
+            Margin = new Thickness(10, 6, 10, 0),
+        };
+        addBtn.Clicked += async (_, _) => await AddCustomAsync(nameEntry.Text ?? "", urlEntry.Text ?? "", addErr);
+        AdsPanelBody.Children.Add(nameEntry);
+        AdsPanelBody.Children.Add(urlEntry);
+        AdsPanelBody.Children.Add(addErr);
+        AdsPanelBody.Children.Add(addBtn);
         var upd = new Button
         {
             Text = _updating ? "Updating…" : "Update now",
@@ -543,20 +596,117 @@ public partial class BrowserPage : ContentPage
         AdsPanelBody.Children.Add(done);
     }
 
-    static View AdsListRow(AdBlockService.ListStatus s, Color dim)
+    View AdsListRow(AdBlockService.ListStatus s, Color dim)
     {
-        string sub = !s.HasCache ? "Not downloaded yet"
+        var cb = new HdCheckBox { IsChecked = s.Enabled };
+        var texts = new VerticalStackLayout
+        {
+            Spacing = 0,
+            VerticalOptions = LayoutOptions.Center,
+            HorizontalOptions = LayoutOptions.StartAndExpand,
+        };
+        texts.Children.Add(new Label { Text = s.Name, FontSize = 13, TextColor = Colors.White });
+        string sub = !s.Enabled ? "Off"
+            : !s.HasCache ? "Not downloaded yet"
             : s.UpdatedUtc == null ? "Saved copy, age unknown"
             : $"Updated {RelAge(s.UpdatedUtc.Value)} · {FmtSize(s.Bytes)}";
-        var box = new VerticalStackLayout { Padding = new Thickness(10, 6) };
-        box.Children.Add(new Label { Text = s.Name, FontSize = 13, TextColor = Colors.White });
-        box.Children.Add(new Label
+        texts.Children.Add(new Label
         {
             Text = sub,
             FontSize = 11,
-            TextColor = s.HasCache ? dim : Color.FromArgb("#E14B32"),
+            TextColor = s.Enabled && !s.HasCache ? Color.FromArgb("#E14B32") : dim,
         });
-        return box;
+        // Text taps toggle the box (split zones: no row-level toggle, nested
+        // taps would fire twice — same pattern as the ad row above).
+        var tap = new TapGestureRecognizer { Command = new Command(() => cb.IsChecked = !cb.IsChecked) };
+        texts.GestureRecognizers.Add(tap);
+        cb.CheckedChanged += async (_, on) => await ToggleListAsync(s.Name, s.IsCustom, on);
+        var row = new HorizontalStackLayout { Spacing = 10, Padding = new Thickness(10, 6) };
+        row.Children.Add(cb);
+        row.Children.Add(texts);
+        if (s.IsCustom)
+        {
+            var rm = new Button
+            {
+                Text = "✕",
+                FontSize = 12,
+                TextColor = dim,
+                BackgroundColor = Colors.Transparent,
+                BorderWidth = 0,
+                Padding = new Thickness(8, 2),
+                VerticalOptions = LayoutOptions.Center,
+            };
+            string name = s.Name;
+            rm.Clicked += async (_, _) =>
+            {
+                bool go = await DisplayAlert("Remove list?",
+                    $"Remove \"{name}\" and delete its downloaded copy?", "Remove", "Keep");
+                if (go) await RemoveCustomAsync(name);
+            };
+            row.Children.Add(rm);
+        }
+        AddHoverBg(row);
+        return row;
+    }
+
+    async Task ToggleListAsync(string name, bool isCustom, bool on)
+    {
+        if (_updating) return;
+        if (isCustom)
+        {
+            var c = _store.Prefs.CustomLists.FirstOrDefault(x => x.Name == name);
+            if (c == null) return;
+            c.Enabled = on;
+        }
+        else if (on)
+            _store.Prefs.DisabledLists.Remove(name);
+        else if (!_store.Prefs.DisabledLists.Contains(name))
+            _store.Prefs.DisabledLists.Add(name);
+        _store.SavePrefs();
+        PushListsToAds();
+        if (on)
+            await UpdateListsAsync(); // newly enabled: fetch what's missing, same as Update now
+        else
+        {
+            await _ads.ReloadFromCacheAsync(); // instant: drop its rules, no network
+            RebuildAdsPanel();
+        }
+    }
+
+    async Task RemoveCustomAsync(string name)
+    {
+        if (_updating) return;
+        _store.Prefs.CustomLists.RemoveAll(x => x.Name == name);
+        _store.SavePrefs();
+        PushListsToAds();
+        _ads.DeleteCacheFor(AdBlockService.CacheKey(name));
+        await _ads.ReloadFromCacheAsync();
+        RebuildAdsPanel();
+    }
+
+    async Task AddCustomAsync(string name, string url, Label err)
+    {
+        if (_updating) return;
+        err.IsVisible = false;
+        name = name.Trim();
+        url = url.Trim();
+        string? fail = ValidateCustom(name, url);
+        if (fail != null) { err.Text = fail; err.IsVisible = true; return; }
+        _store.Prefs.CustomLists.Add(new CustomList { Name = name, Url = url, Enabled = true });
+        _store.SavePrefs();
+        PushListsToAds();
+        await UpdateListsAsync(); // downloads the new list, rebuilds, sets the failure flag
+    }
+
+    string? ValidateCustom(string name, string url)
+    {
+        if (name.Length == 0) return "Give the list a name.";
+        var key = AdBlockService.CacheKey(name);
+        if (_ads.GetListStatus().Any(s => AdBlockService.CacheKey(s.Name) == key))
+            return "A list with that name already exists.";
+        if (!Uri.TryCreate(url, UriKind.Absolute, out var u) || (u.Scheme != "http" && u.Scheme != "https"))
+            return "URL must start with http:// or https://.";
+        return null;
     }
 
     static string RelAge(DateTime utc)
@@ -582,7 +732,7 @@ public partial class BrowserPage : ContentPage
         try { await _ads.EnsureLoadedAsync(force: true); }
         catch { }
         _updating = false;
-        try { _lastUpdateFailed = _ads.GetListStatus().Any(s => !s.HasCache); }
+        try { _lastUpdateFailed = _ads.GetListStatus().Any(s => s.Enabled && !s.HasCache); }
         catch { _lastUpdateFailed = true; }
         RebuildAdsPanel();
     }
