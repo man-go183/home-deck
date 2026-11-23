@@ -51,6 +51,7 @@ public partial class BrowserPage : ContentPage
             {
                 hh.PickEscPressed = OnPickEsc;
                 hh.CountsChanged = OnCountsChanged;
+                hh.PickCancelRequested = () => CancelPickMode();
             }
         };
 
@@ -170,9 +171,13 @@ public partial class BrowserPage : ContentPage
     {
         try
         {
-            if (host != Web.PageHost)
+            // Frame-aware gate: reports arrive from any armed frame (top or
+            // iframe, each with its own host), so gate on armed state, not
+            // on matching the top page host. Stale reports can't outlive a
+            // navigation: StartNavigation always disarms first.
+            if (!_pickArmed)
             {
-                _ads.NoteReportError($"report: dropped (page is '{Web.PageHost}', report from '{host}')");
+                _ads.NoteReportError($"report: dropped (picker not armed; from '{host}')");
                 if (AdsPanel.IsVisible) RebuildAdsPanel();
                 return;
             }
@@ -214,12 +219,13 @@ public partial class BrowserPage : ContentPage
     /// while the page is on screen, so the WebView is ready to navigate.</summary>
     void StartNavigation(Profile p)
     {
+        // Disarm first: kills the overlay everywhere, removes the auto-arm
+        // snippet (new documents must not self-arm), then resets + navigates.
+        CancelPickMode();
         Web.Source = new UrlWebViewSource { Url = p.Url };
         Web.ResetBlockedCount();
         Web.ResetHiddenCount();
         _sessionPicks.Clear();
-        _pickArmed = false;
-        PickCancelBtn.IsVisible = false;
         Splash.IsVisible = true;
         _navStarted = false;
         SplashStatus.Text = "Loading…";
