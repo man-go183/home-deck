@@ -163,10 +163,11 @@ window.__hdCountMatches = function (list) {
       }
     } catch (e) {}
     try {
-      // Post the OBJECT: WebMessageAsJson double-wraps a posted string,
-      // which once made every report unparseable (and silent).
+      // String form: this SDK's postMessage is string-only (an object arg
+      // throws and dies silent in the catch below). The shell unwraps
+      // a JSON string before reading the payload.
       if (window.chrome && window.chrome.webview && window.chrome.webview.postMessage) {
-        window.chrome.webview.postMessage(payload);
+        window.chrome.webview.postMessage(JSON.stringify(payload));
         return true;
       }
     } catch (e2) {}
