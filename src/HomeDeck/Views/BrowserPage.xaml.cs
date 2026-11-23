@@ -19,6 +19,10 @@ public partial class BrowserPage : ContentPage
     bool _updating;
     bool _lastUpdateFailed;
     bool _pickArmed;
+    /// <summary>Session-only picks (user: no persistence for now). Live
+    /// hide/delete + count + panel list while the page is open; cleared
+    /// on every navigation, never written to prefs.</summary>
+    readonly List<PickerRule> _sessionPicks = new();
 #if ANDROID
     bool _titleViewSet;
 #endif
@@ -43,7 +47,11 @@ public partial class BrowserPage : ContentPage
         Web.HandlerChanged += (_, _) =>
         {
             // Window-level Esc (fires even with focus buried in an iframe).
-            if (Web.Handler is ShellWebViewHandler hh) hh.PickEscPressed = OnPickEsc;
+            if (Web.Handler is ShellWebViewHandler hh)
+            {
+                hh.PickEscPressed = OnPickEsc;
+                hh.CountsChanged = OnCountsChanged;
+            }
         };
 
         Web.Navigating += (_, e) =>
@@ -154,35 +162,40 @@ public partial class BrowserPage : ContentPage
     void PushListsToAds()
         => _ads.ApplyConfig(_store.Prefs.DisabledLists, _store.Prefs.CustomLists, _store.Prefs.PickerRules);
 
-    /// <summary>Picked element reported by page JS: save the per-site rule
-    /// (hide or remove mode) and rebuild the engine. The element is
-    /// already hidden/deleted live in the page by the picker overlay.</summary>
-    async void OnPickerReported(string host, string selector, string mode)
+    /// <summary>Picked element reported by page JS: count it and list it
+    /// for this session only (no prefs, no engine reload). The element is
+    /// already hidden/deleted live in the page by the picker overlay.
+    /// Late reports for a previous page (host mismatch) are dropped.</summary>
+    void OnPickerReported(string host, string selector, string mode)
     {
         try
         {
-            if (!_store.Prefs.PickerRules.Any(r => r.Host == host && r.Selector == selector))
+            if (host != Web.PageHost) return;
+            if (!_sessionPicks.Any(r => r.Host == host && r.Selector == selector))
             {
-                if (_store.Prefs.PickerRules.Count >= 500) return;
-                _store.Prefs.PickerRules.Add(new PickerRule { Host = host, Selector = selector, Mode = mode });
-                _store.SavePrefs();
-                PushListsToAds();
+                if (_sessionPicks.Count >= 500) return;
+                _sessionPicks.Add(new PickerRule { Host = host, Selector = selector, Mode = mode });
                 Web.AddPickedHidden();
                 _ads.ClearReportError();
-                await _ads.ReloadFromCacheAsync();
             }
             if (AdsPanel.IsVisible) RebuildAdsPanel();
         }
         catch (Exception e) { try { _ads.NoteReportError("report: page save threw (" + e.GetType().Name + ")"); } catch { } }
     }
 
-    async Task RemovePickerRuleAsync(string host, string selector)
+    /// <summary>Cosmetic count pass finished (late passes included):
+    /// refresh the open panel so it never shows a stale zero. The handler
+    /// fires off the UI thread, so marshal here.</summary>
+    void OnCountsChanged()
+    {
+        try { MainThread.BeginInvokeOnMainThread(() => { try { if (AdsPanel.IsVisible) RebuildAdsPanel(); } catch { } }); } catch { }
+    }
+
+    void RemovePickerRuleAsync(string host, string selector)
     {
         if (_updating) return;
-        _store.Prefs.PickerRules.RemoveAll(r => r.Host == host && r.Selector == selector);
-        _store.SavePrefs();
-        PushListsToAds();
-        await _ads.ReloadFromCacheAsync();
+        int n = _sessionPicks.RemoveAll(r => r.Host == host && r.Selector == selector);
+        for (int i = 0; i < n; i++) Web.RemovePickedHidden();
         RebuildAdsPanel();
     }
 
@@ -199,7 +212,9 @@ public partial class BrowserPage : ContentPage
         Web.Source = new UrlWebViewSource { Url = p.Url };
         Web.ResetBlockedCount();
         Web.ResetHiddenCount();
+        _sessionPicks.Clear();
         _pickArmed = false;
+        PickCancelBtn.IsVisible = false;
         Splash.IsVisible = true;
         _navStarted = false;
         SplashStatus.Text = "Loading…";
@@ -303,8 +318,7 @@ public partial class BrowserPage : ContentPage
     {
         if (_pickArmed)
         {
-            _pickArmed = false;
-            if (Web.Handler is ShellWebViewHandler bh) bh.CancelPickerMode();
+            CancelPickMode();
             return true;
         }
         if (AdsPanel.IsVisible) { CloseAdsPanel(); return true; }
@@ -410,7 +424,7 @@ public partial class BrowserPage : ContentPage
                 // Subtitle-style proof row: smaller + fainter than menu text.
                 DropList.Children.Add(new Label
                 {
-                    Text = $"Blocked {Web.BlockedCount} · Hidden {Web.HiddenCount} on this page",
+                    Text = $"Blocked {Web.BlockedCount} network · Hidden {Web.HiddenCount} on-page",
                     FontSize = 11,
                     TextColor = Color.FromRgba(242, 237, 232, 110),
                     Padding = new Thickness(10, 0, 10, 4),
@@ -452,16 +466,27 @@ public partial class BrowserPage : ContentPage
 #if WINDOWS
         try { if (Web.Handler is ShellWebViewHandler cur1) cur1.SetWaitCursor(false); } catch { }
 #endif
-        if (res != "ok") await SayPickAsync(res);
+        if (res != "ok") { PickCancelBtn.IsVisible = false; await SayPickAsync(res); }
+        else PickCancelBtn.IsVisible = true;
     }
+
+    /// <summary>Shared pick-mode exit: native overlay button, system back,
+    /// and window-level Esc all land here. Never depends on the page.</summary>
+    void CancelPickMode()
+    {
+        _pickArmed = false;
+        PickCancelBtn.IsVisible = false;
+        try { if (Web.Handler is ShellWebViewHandler h) h.CancelPickerMode(); } catch { }
+    }
+
+    void OnPickCancel(object? sender, EventArgs e) => CancelPickMode();
 
     /// <summary>Window-level Esc: consumed only while pick mode is armed
     /// (the page's own Esc listener never fires with focus in an iframe).</summary>
     bool OnPickEsc()
     {
         if (!_pickArmed) return false;
-        _pickArmed = false;
-        if (Web.Handler is ShellWebViewHandler h) h.CancelPickerMode();
+        CancelPickMode();
         return true;
     }
 
@@ -545,9 +570,16 @@ public partial class BrowserPage : ContentPage
         AdsPanelBody.Children.Add(trow);
         AdsPanelBody.Children.Add(new Label
         {
-            Text = $"Blocked {Web.BlockedCount} · Hidden {Web.HiddenCount} on this page",
+            Text = $"Blocked {Web.BlockedCount} network · Hidden {Web.HiddenCount} on-page",
             FontSize = 11,
             TextColor = Color.FromRgba(242, 237, 232, 110),
+            Padding = new Thickness(10, 0, 10, 4),
+        });
+        AdsPanelBody.Children.Add(new Label
+        {
+            Text = _ads.Ready ? $"Engine ready · {_ads.LoadedRuleCount:N0} rules" : "Engine not ready — blocking off",
+            FontSize = 11,
+            TextColor = dim,
             Padding = new Thickness(10, 0, 10, 4),
         });
         AdsPanelBody.Children.Add(MenuDivider());
@@ -626,7 +658,7 @@ public partial class BrowserPage : ContentPage
         AdsPanelBody.Children.Add(urlEntry);
         AdsPanelBody.Children.Add(addErr);
         AdsPanelBody.Children.Add(addBtn);
-        var picks = _store.Prefs.PickerRules;
+        var picks = _sessionPicks;
         AdsPanelBody.Children.Add(new Label
         {
             Text = "PICKED ELEMENTS",
@@ -683,7 +715,7 @@ public partial class BrowserPage : ContentPage
                 {
                     bool go = await DisplayAlert("Remove rule?",
                         $"Stop hiding this on {host}? It will reappear after you reload the page.", "Remove", "Keep");
-                    if (go) await RemovePickerRuleAsync(host, selector);
+                    if (go) RemovePickerRuleAsync(host, selector);
                 };
                 var prow = new HorizontalStackLayout { Spacing = 10, Padding = new Thickness(10, 6) };
                 prow.Children.Add(texts);
