@@ -20,6 +20,10 @@ public partial class ShellWebViewHandler
     /// cancelled. Wired by the page (it owns the armed flag).</summary>
     public Func<bool>? PickEscPressed;
 
+    /// <summary>Fired (off the UI thread) after every cosmetic count pass,
+    /// including the late one. Wired by the page to refresh open UI.</summary>
+    public Action? CountsChanged;
+
     protected override void ConnectHandler(Microsoft.UI.Xaml.Controls.WebView2 platformView)
     {
         base.ConnectHandler(platformView);
@@ -173,25 +177,36 @@ public partial class ShellWebViewHandler
         var css2 = ads.GetCosmeticCssForClasses(pageHost, string.Join(",", classes), string.Join(",", ids));
         if (!string.IsNullOrEmpty(css2) && css2 != css)
             await wv.ExecuteScriptAsync("var s=document.createElement('style');s.textContent=" + JsonSerializer.Serialize(css2) + ";document.documentElement.appendChild(s);");
-        CountCosmeticHidden(wv, view, ads, css, css2);
+        CountCosmeticHidden(wv, view, ads, css, css2, view.PageGen, CountsChanged);
     }
 
-    /// <summary>Count page elements matching the injected selectors (one
-    /// pass per load; capped). Fire-and-forget: a 0 on any failure.</summary>
+    /// <summary>Count page elements matching the injected selectors. One
+    /// pass at load plus a late pass for slow pages (bounded); stale
+    /// pages (navigated since) are skipped via the generation guard.</summary>
     static void CountCosmeticHidden(
-        Microsoft.UI.Xaml.Controls.WebView2 wv, ShellWebView view, AdBlockService ads, string css, string css2)
+        Microsoft.UI.Xaml.Controls.WebView2 wv, ShellWebView view, AdBlockService ads, string css, string css2,
+        int gen, Action? onCounted)
     {
         _ = Task.Run(async () =>
         {
-            try
+            async Task CountOnceAsync()
             {
-                var set = new HashSet<string>(AdBlockService.CosmeticSelectors(css));
-                foreach (var s in AdBlockService.CosmeticSelectors(css2)) set.Add(s);
-                if (set.Count == 0) { view.SetCosmeticHidden(0); return; }
-                var raw = await wv.ExecuteScriptAsync("window.__hdCountMatches&&window.__hdCountMatches(" + JsonSerializer.Serialize(set.Take(300).ToArray()) + ")");
-                if (int.TryParse(raw, out int n)) view.SetCosmeticHidden(n);
+                try
+                {
+                    var set = new HashSet<string>(AdBlockService.CosmeticSelectors(css));
+                    foreach (var s in AdBlockService.CosmeticSelectors(css2)) set.Add(s);
+                    if (view.PageGen != gen) return;
+                    if (set.Count == 0) { view.SetCosmeticHidden(0); return; }
+                    var raw = await wv.ExecuteScriptAsync("window.__hdCountMatches&&window.__hdCountMatches(" + JsonSerializer.Serialize(set.Take(300).ToArray()) + ")");
+                    if (view.PageGen != gen) return;
+                    if (int.TryParse(raw?.Trim('"'), out int n)) view.SetCosmeticHidden(n);
+                }
+                catch { }
+                try { onCounted?.Invoke(); } catch { }
             }
-            catch { }
+            await CountOnceAsync();
+            try { await Task.Delay(4000); } catch { }
+            await CountOnceAsync();
         });
     }
 
