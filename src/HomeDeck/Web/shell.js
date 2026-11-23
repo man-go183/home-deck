@@ -202,22 +202,46 @@ window.__hdCountMatches = function (list) {
 
   function onScroll() { if (active && locked) place(locked); }
 
+  // Draggable bar: grab empty bar space (not the buttons) to move it,
+  // so elements behind it can be reached. Sits below the native X.
+  var dragPt = null;
+
+  function onDragStart(e) {
+    if (!active || !bar) return;
+    if (e.target && e.target.closest && e.target.closest("button")) return;
+    dragPt = { x: e.clientX, y: e.clientY };
+    try { e.preventDefault(); } catch (e2) {}
+  }
+
+  function onDragMove(e) {
+    if (!dragPt || !bar) return;
+    try {
+      var r = bar.getBoundingClientRect();
+      bar.style.transform = "none";
+      bar.style.left = (r.left + e.clientX - dragPt.x) + "px";
+      bar.style.top = (r.top + e.clientY - dragPt.y) + "px";
+      dragPt = { x: e.clientX, y: e.clientY };
+    } catch (e2) {}
+  }
+
+  function onDragUp() { dragPt = null; }
+
   function doHide() {
     if (!locked) return;
     var sel = genSelector(locked);
     try { locked.style.setProperty("display", "none", "important"); } catch (e) {}
-    report(window.location.hostname || "", sel, "hide");
-    barLabel.textContent = "Hidden ✓";
-    setTimeout(exit, 900);
+    var hid = report(window.location.hostname || "", sel, "hide");
+    barLabel.textContent = hid ? "Hidden ✓" : "Hidden — NOT saved (no bridge)";
+    setTimeout(exit, hid ? 900 : 2500);
   }
 
   function doRemove() {
     if (!locked) return;
     var sel = genSelector(locked);
     try { locked.remove(); } catch (e) {}
-    report(window.location.hostname || "", sel, "remove");
-    barLabel.textContent = "Deleted ✓";
-    setTimeout(exit, 900);
+    var rem = report(window.location.hostname || "", sel, "remove");
+    barLabel.textContent = rem ? "Deleted ✓" : "Deleted — NOT saved (no bridge)";
+    setTimeout(exit, rem ? 900 : 2500);
   }
 
   function cancel() { exit(); }
@@ -228,12 +252,14 @@ window.__hdCountMatches = function (list) {
       document.removeEventListener("click", onTap, true);
       document.removeEventListener("mouseover", onHover, true);
       document.removeEventListener("keydown", onKey, true);
+      document.removeEventListener("pointermove", onDragMove, true);
+      document.removeEventListener("pointerup", onDragUp, true);
       window.removeEventListener("scroll", onScroll, true);
       window.removeEventListener("resize", onScroll, true);
       if (overlay && overlay.parentNode) overlay.parentNode.removeChild(overlay);
       if (bar && bar.parentNode) bar.parentNode.removeChild(bar);
     } catch (e) {}
-    overlay = null; bar = null; barLabel = null;
+    overlay = null; bar = null; barLabel = null; dragPt = null;
   }
 
   function start() {
@@ -246,8 +272,8 @@ window.__hdCountMatches = function (list) {
       "background:repeating-linear-gradient(45deg,rgba(232,179,74,0.40) 0 10px,rgba(232,179,74,0.10) 10px 20px);";
     bar = document.createElement("div");
     bar.setAttribute("data-hd-pick", "1");
-    bar.style.cssText = "position:fixed;display:none;top:10px;left:50%;transform:translateX(-50%);z-index:2147483647;" +
-      "align-items:center;gap:8px;max-width:92vw;padding:8px 10px;border-radius:10px;" +
+    bar.style.cssText = "position:fixed;display:none;top:64px;left:50%;transform:translateX(-50%);z-index:2147483647;" +
+      "align-items:center;gap:8px;max-width:92vw;padding:8px 10px;border-radius:10px;touch-action:none;" +
       "background:#161311;border:1px solid " + GOLD + ";color:#fff;" +
       "font:13px -apple-system,Segoe UI,Roboto,sans-serif;box-shadow:0 4px 16px rgba(0,0,0,.5);";
     barLabel = document.createElement("span");
@@ -270,6 +296,9 @@ window.__hdCountMatches = function (list) {
     document.addEventListener("click", onTap, true);
     document.addEventListener("mouseover", onHover, true);
     document.addEventListener("keydown", onKey, true);
+    bar.addEventListener("pointerdown", onDragStart);
+    document.addEventListener("pointermove", onDragMove, true);
+    document.addEventListener("pointerup", onDragUp, true);
     window.addEventListener("scroll", onScroll, true);
     window.addEventListener("resize", onScroll, true);
   }
