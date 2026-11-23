@@ -9,7 +9,7 @@
     <!-- title-bar row. On Windows this grid IS the OS title-bar content
          (see BrowserPage.Windows.cs); on Android it is hidden and the pill
          moves into the native toolbar title view. -->
-    <Grid x:Name="TitleBar" Grid.Row="0" ColumnDefinitions="40,*,140"
+    <Grid x:Name="TitleBar" Grid.Row="0" ColumnDefinitions="40,*,40,140"
           Padding="4,0,0,0" BackgroundColor="#000000">
       <Button x:Name="BackBtn" Text="‹" FontSize="18" WidthRequest="40"
               TextColor="{StaticResource HdText}" BackgroundColor="Transparent"
@@ -38,8 +38,20 @@
           <TapGestureRecognizer Tapped="OnPillTap" />
         </Label.GestureRecognizers>
       </HorizontalStackLayout>
+      <!-- icon-only reload, beside the pill (no text) -->
+      <Grid x:Name="ReloadBtn" Grid.Column="2" WidthRequest="40"
+            VerticalOptions="FillAndExpand" HorizontalOptions="Center">
+        <Path Data="M23 4v6h-6 M20.49 15a9 9 0 1 1-2.12-9.36L23 10"
+              Stroke="{StaticResource HdText}" StrokeThickness="1.8"
+              StrokeLineCap="Round" StrokeLineJoin="Round" Fill="Transparent"
+              WidthRequest="18" HeightRequest="18" Aspect="Uniform"
+              HorizontalOptions="Center" VerticalOptions="Center" />
+        <Grid.GestureRecognizers>
+          <TapGestureRecognizer Tapped="OnReload" />
+        </Grid.GestureRecognizers>
+      </Grid>
       <!-- caption-button reserve (Windows min/max/close overlay this area) -->
-      <BoxView Grid.Column="2" Color="Transparent" />
+      <BoxView Grid.Column="3" Color="Transparent" />
     </Grid>
 
     <Grid Grid.Row="1">

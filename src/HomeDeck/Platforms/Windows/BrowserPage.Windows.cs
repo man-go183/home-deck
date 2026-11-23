@@ -12,8 +12,8 @@ namespace HomeDeck.Views;
 /// Windows title-bar integration: the page's back button + profile pill move
 /// INTO the OS caption as a real TitleBar, so the caption row genuinely is our
 /// header (single row — no framework row above, no in-page row below). Drag
-/// works everywhere on the bar except the back button, the pill, and the
-/// caption-button reserve on the right.
+/// works everywhere on the bar except the back button, the pill, the reload
+/// icon, and the caption-button reserve on the right.
 /// If anything here throws, the page simply keeps its normal look.
 /// </summary>
 public partial class BrowserPage
@@ -55,6 +55,7 @@ public partial class BrowserPage
             {
                 TitleBar.Children.Remove(BackBtn);
                 TitleBar.Children.Remove(Pill);
+                TitleBar.Children.Remove(ReloadBtn);
                 TitleBar.IsVisible = false;
                 // Caption layout = mock inner state: pill hugs the back
                 // button on the left (never centered), and the back loses
@@ -67,8 +68,8 @@ public partial class BrowserPage
                 if (TitleBar.Parent is Grid outer && outer.RowDefinitions.Count > 0)
                     outer.RowDefinitions[0].Height = Microsoft.Maui.GridLength.Auto;
                 // TitleBar only takes a single Content view (no LeadingView /
-                // TrailingView in this SDK), so wrap back + pill + spacer in
-                // a 3-column grid that mirrors the in-page layout.
+                // TrailingView in this SDK), so wrap back + pill + reload +
+                // spacer in a 4-column grid that mirrors the in-page layout.
                 var spacer = new BoxView
                 {
                     WidthRequest = 140,
@@ -80,15 +81,18 @@ public partial class BrowserPage
                     {
                         new ColumnDefinition { Width = new Microsoft.Maui.GridLength(40) },
                         new ColumnDefinition { Width = Microsoft.Maui.GridLength.Star },
+                        new ColumnDefinition { Width = new Microsoft.Maui.GridLength(40) },
                         new ColumnDefinition { Width = new Microsoft.Maui.GridLength(140) },
                     },
                 };
                 barGrid.Children.Add(BackBtn);
                 barGrid.Children.Add(Pill);
+                barGrid.Children.Add(ReloadBtn);
                 barGrid.Children.Add(spacer);
                 Grid.SetColumn(BackBtn, 0);
                 Grid.SetColumn(Pill, 1);
-                Grid.SetColumn(spacer, 2);
+                Grid.SetColumn(ReloadBtn, 2);
+                Grid.SetColumn(spacer, 3);
                 _winBar = new Microsoft.Maui.Controls.TitleBar
                 {
                     HeightRequest = 40,
@@ -137,6 +141,7 @@ public partial class BrowserPage
             if (bar.Width <= 0 || bar.Height <= 0) return;
             var back = ToPx(BackBtn, content, scale);
             var pill = ToPx(Pill, content, scale);
+            var reload = ToPx(ReloadBtn, content, scale);
 
             // Right-side reserve for the OS caption buttons (~3x46 logical px).
             double reserve = 140 * scale;
@@ -147,7 +152,9 @@ public partial class BrowserPage
             AddRect(rects, back.X + back.Width, bar.Y,
                 pill.X - (back.X + back.Width), bar.Height);
             AddRect(rects, pill.X + pill.Width, bar.Y,
-                reserveX - (pill.X + pill.Width), bar.Height);
+                reload.X - (pill.X + pill.Width), bar.Height);
+            AddRect(rects, reload.X + reload.Width, bar.Y,
+                reserveX - (reload.X + reload.Width), bar.Height);
             _win.AppWindow.TitleBar.SetDragRectangles(rects.ToArray());
         }
         catch { /* window stays usable, just not draggable by the bar */ }

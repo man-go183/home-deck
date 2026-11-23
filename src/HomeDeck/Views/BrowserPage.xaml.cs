@@ -92,7 +92,7 @@ public partial class BrowserPage : ContentPage
             {
                 Spacing = 8,
                 VerticalOptions = LayoutOptions.Center,
-                Children = { BackBtn, Pill }
+                Children = { BackBtn, Pill, ReloadBtn }
             };
             NavigationPage.SetHasBackButton(this, false);
             NavigationPage.SetTitleView(this, root);
@@ -342,6 +342,11 @@ public partial class BrowserPage : ContentPage
     {
         if (Web.CanGoBack) Web.GoBack();
         else await Navigation.PopAsync();
+    }
+
+    void OnReload(object? sender, TappedEventArgs e)
+    {
+        try { Web.Reload(); } catch { }
     }
 
     void OnPillTap(object? sender, TappedEventArgs e)
