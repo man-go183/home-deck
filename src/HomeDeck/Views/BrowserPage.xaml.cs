@@ -49,7 +49,10 @@ public partial class BrowserPage : ContentPage
             // Window-level Esc (fires even with focus buried in an iframe).
             if (Web.Handler is ShellWebViewHandler hh)
             {
+#if WINDOWS
+                // Windows-only: other platforms' handler partial has no key path.
                 hh.PickEscPressed = OnPickEsc;
+#endif
                 hh.CountsChanged = OnCountsChanged;
                 hh.PickCancelRequested = () => CancelPickMode();
             }
