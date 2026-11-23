@@ -157,6 +157,10 @@ public sealed class AdBlockService
 
     public bool Ready => _loadedAt != DateTime.MinValue;
 
+    /// <summary>Rules in the loaded engine (panel diagnostics: tells
+    /// "engine empty" apart from "page clean"). Updated on every load.</summary>
+    public int LoadedRuleCount { get; private set; }
+
     public async Task EnsureLoadedAsync(bool force = false)
     {
         int days = Math.Max(1, RefreshDays);
@@ -208,7 +212,23 @@ public sealed class AdBlockService
         }
         all.AddRange(PickerRuleLines());
         if (all.Count > 0 && RustFilterEngine.LoadAllRules(string.Join("\n", all)))
+        {
             _loadedAt = DateTime.UtcNow;
+            LoadedRuleCount = CountRules(all);
+        }
+    }
+
+    /// <summary>Rule-ish lines across list texts (comments/empty skipped).</summary>
+    static int CountRules(IEnumerable<string> texts)
+    {
+        int n = 0;
+        foreach (var t in texts)
+            foreach (var line in t.Split('\n'))
+            {
+                var s = line.Trim();
+                if (s.Length > 0 && s[0] != '!' && s[0] != '[') n++;
+            }
+        return n;
     }
 
     /// <summary>Rebuild the engine from on-disk caches only (no network):
@@ -229,7 +249,10 @@ public sealed class AdBlockService
         }
         all.AddRange(PickerRuleLines());
         if (RustFilterEngine.LoadAllRules(string.Join("\n", all)))
+        {
             _loadedAt = DateTime.UtcNow;
+            LoadedRuleCount = CountRules(all);
+        }
     }
 
     /// <summary>Last fire-and-forget failure (picker report or list load),
