@@ -19,7 +19,7 @@ public partial class ShellWebViewHandler : WebViewHandler
         if (IsChanErr(first))
             return "fail: js-channel: the page did not answer (" + first + "). Scripts are not executing in this page.";
         if (!first.Contains("missing"))
-            return InterpretArm(first);
+            return await FinishArmAsync(InterpretArm(first));
         var (text, readErr) = await ReadShellJsAsync();
         if (text == null)
             return "fail: package: could not read the pick script from the app package (" + readErr + "). Reinstall the app.";
@@ -31,11 +31,29 @@ public partial class ShellWebViewHandler : WebViewHandler
             return "fail: js-channel: the page stopped answering after injection (" + second + ").";
         if (second.Contains("missing"))
             return "fail: inject: script ran but the pick module is still missing.";
-        return InterpretArm(second);
+        return await FinishArmAsync(InterpretArm(second));
+    }
+
+    /// <summary>Top frame armed: reach same-origin frames + register the
+    /// auto-arm snippet (platform). Best-effort — never turns ok into fail.</summary>
+    async Task<string> FinishArmAsync(string r)
+    {
+        if (r == "ok") await ArmFramesAsync();
+        return r;
     }
 
     /// <summary>Probe + start + verify in a single page call.</summary>
     const string ArmJs = "(function(){try{if(!window.HomeDeckPick)return 'missing';window.HomeDeckPick.start();return window.HomeDeckPick.isActive()?'ok':'start-failed';}catch(e){return 'threw:'+((e&&e.message)||e);}})()";
+
+    /// <summary>Best-effort same-origin frame arming (cross-origin frames
+    /// throw per frame and are skipped — they join via the auto-arm
+    /// snippet on their next load while armed). Never throws: channel
+    /// errors come back as THROW:/TIMEOUT strings from EvalJsAsync.</summary>
+    const string ArmFramesJs = "(function(){var n=0;try{function walk(w){try{if(w.HomeDeckPick&&w.HomeDeckPick.isActive&&!w.HomeDeckPick.isActive()){w.HomeDeckPick.start();n++;}}catch(e){}try{var f=w.frames;for(var i=0;i<f.length;i++){try{walk(f[i]);}catch(e){}}}catch(e){}}walk(window);}catch(e){}return 'frames:'+n;})()";
+
+    /// <summary>Auto-start snippet for frames created while armed
+    /// (document-created, runs before anything else in each new frame).</summary>
+    const string AutoArmJs = "(function(){try{if(window.HomeDeckPick&&window.HomeDeckPick.isActive&&!window.HomeDeckPick.isActive())window.HomeDeckPick.start();}catch(e){}})();";
 
     static string InterpretArm(string r)
     {
@@ -48,6 +66,7 @@ public partial class ShellWebViewHandler : WebViewHandler
     /// <summary>Fire-and-forget pick-mode exit (back button, Esc).</summary>
     public void CancelPickerMode()
     {
+        try { DisarmFrames(); } catch { }
         try { _ = EvalJsAsync("window.HomeDeckPick&&window.HomeDeckPick.cancel()"); } catch { }
     }
 
@@ -70,4 +89,10 @@ public partial class ShellWebViewHandler : WebViewHandler
     // Per-platform primitives (never throw; channel errors as THROW:/TIMEOUT).
     private partial Task<string?> EnsureEngineAsync();
     private partial Task<string> EvalJsAsync(string js);
+
+    /// <summary>Reach frames after a top-frame arm (platform).</summary>
+    private partial Task ArmFramesAsync();
+
+    /// <summary>Undo ArmFramesAsync (snippet removal etc). Sync fire-and-forget.</summary>
+    partial void DisarmFrames();
 }
