@@ -2,6 +2,7 @@ using System.Text.Json;
 using Microsoft.Maui.ApplicationModel;
 using Microsoft.Maui.ApplicationModel.DataTransfer;
 using Microsoft.Maui.Devices;
+using Microsoft.Maui.Devices.Sensors;
 using Microsoft.Maui.Networking;
 
 namespace HomeDeck.Services;
@@ -103,6 +104,26 @@ public static class DeviceBridge
     public static async Task<string> ClipboardReadAsync()
     {
         try { return Ok(new { text = await Clipboard.Default.GetTextAsync() ?? "" }); }
+        catch (Exception e) { return Fail(e.Message); }
+    }
+
+    /// <summary>One-shot position. Caller (platform bridge) requests the
+    /// runtime permission first; here we just read. Fail-soft JSON.</summary>
+    public static async Task<string> GetLocationAsync()
+    {
+        try
+        {
+            var req = new GeolocationRequest(GeolocationAccuracy.Medium, TimeSpan.FromSeconds(15));
+            var loc = await Geolocation.Default.GetLocationAsync(req);
+            if (loc == null) return Fail("unavailable");
+            return Ok(new
+            {
+                lat = loc.Latitude,
+                lon = loc.Longitude,
+                accuracy = loc.Accuracy,
+                time = loc.Timestamp.UtcDateTime.ToString("o")
+            });
+        }
         catch (Exception e) { return Fail(e.Message); }
     }
 

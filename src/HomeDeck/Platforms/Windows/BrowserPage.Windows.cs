@@ -80,9 +80,9 @@ public partial class BrowserPage
                     ColumnDefinitions =
                     {
                         new ColumnDefinition { Width = new Microsoft.Maui.GridLength(40) },
-                        new ColumnDefinition { Width = Microsoft.Maui.GridLength.Star },
+                        new ColumnDefinition { Width = Microsoft.Maui.GridLength.Auto },
                         new ColumnDefinition { Width = new Microsoft.Maui.GridLength(40) },
-                        new ColumnDefinition { Width = new Microsoft.Maui.GridLength(140) },
+                        new ColumnDefinition { Width = Microsoft.Maui.GridLength.Star },
                     },
                 };
                 barGrid.Children.Add(BackBtn);

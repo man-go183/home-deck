@@ -1,0 +1,31 @@
+Home Deck for Windows — installing the MSIX (sideload)
+=========================================================
+
+You need 3 files from the release: HomeDeck.msix, HomeDeck.cer (this
+certificate), and this guide. Install once — every future update then
+installs normally with a double-click.
+
+STEP 1 — TRUST HOME DECK (one time per machine, ~4 clicks)
+-----------------------------------------------------------
+1. Double-click HomeDeck.cer → click "Install Certificate…"
+2. Choose "Local Machine" → Next (approve the admin prompt if asked)
+3. Choose "Place all certificates in the following store" → Browse →
+   select "Trusted People" → OK → Next
+4. Click "Finish" → OK on the success popup
+
+STEP 2 — INSTALL THE APP
+------------------------
+Double-click HomeDeck.msix → Install.
+
+NOTES
+-----
+- SmartScreen may show an "unknown publisher" warning on first run
+  (we have no download reputation yet). Click "More info" → "Run anyway",
+  once — it learns.
+- You need admin rights for Step 1. Without them, use the unpackaged
+  exe build instead (no install, but Windows notification-reading and
+  Bluetooth scanning are unavailable in it).
+- To uninstall: Settings → Apps → Home Deck → Uninstall. The certificate
+  can stay; it does nothing without the app.
+- The certificate is valid 10 years. If it ever expires, a new .cer
+  ships with that release and Step 1 repeats once.

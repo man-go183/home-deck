@@ -26,6 +26,8 @@
   <ItemGroup Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'windows'">
     <Content Include="Platforms\Windows\Assets\*.png" />
     <MauiXaml Remove="Platforms\Windows\App.xaml" />
+    <!-- WMI brightness control (internal displays) -->
+    <PackageReference Include="System.Management" Version="9.0.0" />
     <!-- hdblock native blocker, built by CI (see windows.yml). Missing file = blocking off, build still works. -->
     <Content Include="runtimes\win-x64\native\hdblock.dll" Condition="Exists('runtimes\win-x64\native\hdblock.dll')" CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>

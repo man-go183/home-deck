@@ -30,5 +30,8 @@
   </Applications>
   <Capabilities>
     <rescap:Capability Name="runFullTrust" />
+    <uap:Capability Name="userNotificationListener" />
+    <DeviceCapability Name="location" />
+    <DeviceCapability Name="bluetooth" />
   </Capabilities>
 </Package>

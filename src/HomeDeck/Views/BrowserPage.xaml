@@ -42,9 +42,9 @@
       <Grid x:Name="ReloadBtn" Grid.Column="2" WidthRequest="40"
             VerticalOptions="FillAndExpand" HorizontalOptions="Center">
         <Path Data="M23 4v6h-6 M20.49 15a9 9 0 1 1-2.12-9.36L23 10"
-              Stroke="{StaticResource HdText}" StrokeThickness="1.8"
+              Stroke="{StaticResource HdDim}" StrokeThickness="1.8"
               StrokeLineCap="Round" StrokeLineJoin="Round" Fill="Transparent"
-              WidthRequest="18" HeightRequest="18" Aspect="Uniform"
+              WidthRequest="16" HeightRequest="16" Aspect="Uniform"
               HorizontalOptions="Center" VerticalOptions="Center" />
         <Grid.GestureRecognizers>
           <TapGestureRecognizer Tapped="OnReload" />

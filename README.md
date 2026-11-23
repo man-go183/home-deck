@@ -47,8 +47,13 @@ exists, capability lands later.
 | `shareText(text, title)` | ✅ system sheet |
 | `clipboardWrite/read()` | ✅ |
 | `notify(title, body)` | ✅ local, permission-gated (Android 13+ / iOS-style prompt) |
-| `setBrightness(level)` | ✅ Android app-level only (restores on exit); Windows: stub |
-| `getLocation()`, `bleScan()` | ❌ stub (`not-implemented`) — permissions land with the feature |
+| `setBrightness(level)` | ✅ Android app-level only (restores on exit) |
+| `getLocation()` | ✅ one-shot lat/lon/accuracy (runtime permission) |
+| `bleScan(seconds)` | ✅ name/RSSI scan-only list (runtime permission; Win needs MSIX) |
+| `getNotifications()` | ✅ read access (Android listener opt-in; Win UNL grant, MSIX) |
+| `notificationAccess()` / `openNotificationSettings()` | ✅ enabled-check + settings deep-link |
+| `getBrightness()` / `setBrightness(level)` | ✅ Android in-app window; Win WMI per-machine (fail-soft) |
+| `listDir(path?)` / `fileInfo(path)` / `readFile(path)` | ✅ roots→listing→base64 (8 MB cap); page renders the browser UI |
 
 `homedeck:ready` fires on `window` after injection.
 
@@ -82,6 +87,6 @@ deliberately not in CI yet — add it when the app goes public.
 ## v1 explicitly out
 
 Snapshot-boot images, offline banner, file pickers beyond WebView defaults,
-tray/autostart, SecureStorage tokens, camera/mic/location/BLE bridge methods,
+tray/autostart, SecureStorage tokens, camera/mic bridge methods,
 avatar photo upload, icon/splash art (placeholder PNGs generated in-repo;
 replace `Platforms/Windows/Assets/` + add `MauiIcon`/`MauiSplashScreen` items).
