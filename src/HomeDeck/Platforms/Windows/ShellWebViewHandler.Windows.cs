@@ -42,8 +42,11 @@ public partial class ShellWebViewHandler
         {
             var wv = _wv;
             if (wv == null) return;
-            wv.ChangeCursor(Microsoft.UI.Input.InputSystemCursor.Create(
-                wait ? Microsoft.UI.Input.InputSystemCursorShape.Wait : Microsoft.UI.Input.InputSystemCursorShape.Arrow));
+            if (wait)
+                wv.ProtectedCursor = Microsoft.UI.Input.InputSystemCursor.Create(
+                    Microsoft.UI.Input.InputSystemCursorShape.Wait);
+            else
+                wv.ProtectedCursor = null;
         }
         catch { }
     }
@@ -114,14 +117,35 @@ public partial class ShellWebViewHandler
             // Window-level Esc: fires even when page focus is buried in an
             // iframe (the page's own Esc listener never sees it then).
             // Consumed only while the page says pick mode is armed.
-            core.AcceleratorKeyPressed += (s, e) =>
+            // NOTE: the event lives on the controller, not on CoreWebView2.
+            try
             {
-                try
+                var controller = core.Controller;
+                if (controller != null)
+                    controller.AcceleratorKeyPressed += (s, e) =>
+                    {
+                        try
+                        {
+                            if ((uint)e.VirtualKey == 0x1B && (PickEscPressed?.Invoke() == true)) e.Handled = true;
+                        }
+                        catch { }
+                    };
+            }
+            catch { }
+            // XAML-level fallback: catches Esc when focus is on the shell
+            // chrome rather than inside web content.
+            try
+            {
+                wv.KeyDown += (s, e) =>
                 {
-                    if ((uint)e.VirtualKey == 0x1B && (PickEscPressed?.Invoke() == true)) e.Handled = true;
-                }
-                catch { }
-            };
+                    try
+                    {
+                        if (e.Key == Windows.System.VirtualKey.Escape && (PickEscPressed?.Invoke() == true)) e.Handled = true;
+                    }
+                    catch { }
+                };
+            }
+            catch { }
             core.WebResourceRequested += (s, e) =>
             {
                 try
