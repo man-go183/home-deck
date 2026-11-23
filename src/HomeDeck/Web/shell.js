@@ -198,7 +198,21 @@ window.__hdCountMatches = function (list) {
     showBar(el);
   }
 
-  function onKey(e) { if (e.key === "Escape") cancel(); }
+  function onKey(e) {
+    if (e.key !== "Escape") return;
+    // Global exit first: the shell cancels pick mode everywhere (this
+    // frame's Esc otherwise never reaches other frames or the shell).
+    try {
+      var n = window.HomeDeckNative ||
+        (window.chrome && window.chrome.webview && window.chrome.webview.hostObjects && window.chrome.webview.hostObjects.HomeDeckNative);
+      if (n && n.reportCancel) { try { n.reportCancel(); } catch (e0) {} }
+    } catch (e1) {}
+    try {
+      if (window.chrome && window.chrome.webview && window.chrome.webview.postMessage)
+        window.chrome.webview.postMessage(JSON.stringify({ type: "hd-cancel" }));
+    } catch (e2) {}
+    cancel();
+  }
 
   function onScroll() { if (active && locked) place(locked); }
 
