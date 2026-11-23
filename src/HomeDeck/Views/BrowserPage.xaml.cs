@@ -621,6 +621,23 @@ public partial class BrowserPage : ContentPage
             Padding = new Thickness(4),
             Content = listScroll,
         });
+        var upd = new Button
+        {
+            Text = _updating ? "Updating…" : "Update now",
+            BackgroundColor = gold,
+            TextColor = bg,
+            CornerRadius = 10,
+            IsEnabled = !_updating,
+        };
+        upd.Clicked += async (_, _) => await UpdateListsAsync();
+        AdsPanelBody.Children.Add(upd);
+        AdsPanelBody.Children.Add(new Label
+        {
+            Text = "Some lists couldn't download — kept the current blocking.",
+            FontSize = 12,
+            TextColor = Color.FromArgb("#E14B32"),
+            IsVisible = _lastUpdateFailed,
+        });
         AdsPanelBody.Children.Add(new Label
         {
             Text = "CUSTOM LISTS",
@@ -749,23 +766,6 @@ public partial class BrowserPage : ContentPage
         };
         pickBtn.Clicked += async (_, _) => await ArmPickerAsync();
         AdsPanelBody.Children.Add(pickBtn);
-        var upd = new Button
-        {
-            Text = _updating ? "Updating…" : "Update now",
-            BackgroundColor = gold,
-            TextColor = bg,
-            CornerRadius = 10,
-            IsEnabled = !_updating,
-        };
-        upd.Clicked += async (_, _) => await UpdateListsAsync();
-        AdsPanelBody.Children.Add(upd);
-        AdsPanelBody.Children.Add(new Label
-        {
-            Text = "Some lists couldn't download — kept the current blocking.",
-            FontSize = 12,
-            TextColor = Color.FromArgb("#E14B32"),
-            IsVisible = _lastUpdateFailed,
-        });
         AdsPanelBody.Children.Add(new Label
         {
             Text = "Refresh lists",
