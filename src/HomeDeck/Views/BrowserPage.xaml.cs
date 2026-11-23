@@ -170,7 +170,12 @@ public partial class BrowserPage : ContentPage
     {
         try
         {
-            if (host != Web.PageHost) return;
+            if (host != Web.PageHost)
+            {
+                _ads.NoteReportError($"report: dropped (page is '{Web.PageHost}', report from '{host}')");
+                if (AdsPanel.IsVisible) RebuildAdsPanel();
+                return;
+            }
             if (!_sessionPicks.Any(r => r.Host == host && r.Selector == selector))
             {
                 if (_sessionPicks.Count >= 500) return;
