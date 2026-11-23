@@ -14,8 +14,9 @@ public class HomeDeckHostObject
 {
     readonly Action<string> _post;
     readonly AdBlockService? _ads;
+    readonly Action _onCancel;
 
-    public HomeDeckHostObject(Action<string> post, AdBlockService? ads) { _post = post; _ads = ads; }
+    public HomeDeckHostObject(Action<string> post, AdBlockService? ads, Action? onCancel = null) { _post = post; _ads = ads; _onCancel = onCancel ?? (() => { }); }
 
     /// <summary>Sync answer to page JS: remove-mode selectors for a host
     /// (JSON array). Called at page load by shell.js.</summary>
@@ -23,6 +24,13 @@ public class HomeDeckHostObject
     {
         try { return _ads?.GetRemoveSelectorsJson(host) ?? "[]"; }
         catch { return "[]"; }
+    }
+
+    /// <summary>Frame Esc exit: any frame (top or iframe) ends pick mode
+    /// for the whole shell. Fire-and-forget.</summary>
+    public void reportCancel()
+    {
+        try { _onCancel(); } catch { }
     }
 
     public string getBattery() => DeviceBridge.GetBattery();
