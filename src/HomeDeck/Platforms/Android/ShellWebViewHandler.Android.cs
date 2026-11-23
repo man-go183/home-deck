@@ -15,6 +15,10 @@ public partial class ShellWebViewHandler
     AdBlockService? _ads;
     Android.Webkit.WebView? _wv;
 
+    /// <summary>Fired when any frame asks out of pick mode (Esc).
+    /// Wired by the page to its shared cancel.</summary>
+    public Action? PickCancelRequested;
+
     /// <summary>Fired (off the UI thread) after every cosmetic count pass,
     /// including the late one. Wired by the page to refresh open UI.</summary>
     public Action? CountsChanged;
@@ -28,7 +32,8 @@ public partial class ShellWebViewHandler
         platformView.Settings!.JavaScriptEnabled = true;
         platformView.Settings.DomStorageEnabled = true;
         platformView.AddJavascriptInterface(
-            new HomeDeckJsBridge((ShellWebView)VirtualView, _ads ?? new AdBlockService()),
+            new HomeDeckJsBridge((ShellWebView)VirtualView, _ads ?? new AdBlockService(),
+                () => { try { PickCancelRequested?.Invoke(); } catch { } }),
             "HomeDeckNative");
         platformView.SetWebViewClient(new ShellWebViewClient((ShellWebView)VirtualView, _ads));
 
@@ -65,6 +70,16 @@ public partial class ShellWebViewHandler
         if (_wv == null) return Task.FromResult<string?>("fail: view: no page view yet (open a profile first).");
         return Task.FromResult<string?>(null);
     }
+
+    /// <summary>Best-effort same-origin frame arming. No document-created
+    /// API on Android, so existing cross-origin frames can't be reached —
+    /// same boundary as the desktop build, minus the auto-arm snippet.</summary>
+    private partial async Task ArmFramesAsync()
+    {
+        try { await EvalJsAsync(ArmFramesJs); } catch { }
+    }
+
+    partial void DisarmFrames() { /* nothing platform-held on Android */ }
 
     sealed class JsValue : Java.Lang.Object, IValueCallback
     {
