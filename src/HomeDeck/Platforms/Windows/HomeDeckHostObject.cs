@@ -108,7 +108,7 @@ public class HomeDeckHostObject
                     }
                     catch { }
                     string time = "";
-                    try { time = (n.CreationTime?.UtcDateTime ?? DateTime.UtcNow).ToString("o"); } catch { }
+                    try { time = n.CreationTime.UtcDateTime.ToString("o"); } catch { time = DateTime.UtcNow.ToString("o"); }
                     list.Add(new { app, title, text, time });
                 }
                 _post(JsonPair(id, System.Text.Json.JsonSerializer.Serialize(new { ok = true, data = list })));
