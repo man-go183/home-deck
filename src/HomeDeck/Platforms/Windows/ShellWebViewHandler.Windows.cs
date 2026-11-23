@@ -34,22 +34,12 @@ public partial class ShellWebViewHandler
         base.DisconnectHandler(platformView);
     }
 
-    /// <summary>Wait cursor over the page while arming (WinUI has no
-    /// MAUI-level cursor API). Restored by the caller in a finally.</summary>
-    public void SetWaitCursor(bool wait)
-    {
-        try
-        {
-            var wv = _wv;
-            if (wv == null) return;
-            if (wait)
-                wv.ProtectedCursor = Microsoft.UI.Input.InputSystemCursor.Create(
-                    Microsoft.UI.Input.InputSystemCursorShape.Wait);
-            else
-                wv.ProtectedCursor = null;
-        }
-        catch { }
-    }
+    /// <summary>No-op: WinUI exposes cursor only via the protected
+    /// UIElement.ProtectedCursor (subclass-only), and WebView2 is not
+    /// subclassed here — so there is no compile-safe way to set a wait
+    /// cursor on the view. Kept as a method because the page calls it
+    /// around arming; the single-trip arm is fast enough without one.</summary>
+    public void SetWaitCursor(bool wait) { }
 
     /// <summary>null = engine ready, else "fail: …".</summary>
     private partial async Task<string?> EnsureEngineAsync()
@@ -114,26 +104,12 @@ public partial class ShellWebViewHandler
                 }
                 catch (Exception ex) { try { _ads?.NoteReportError("report: bad pick message (" + ex.GetType().Name + ")"); } catch { } }
             };
-            // Window-level Esc: fires even when page focus is buried in an
-            // iframe (the page's own Esc listener never sees it then).
-            // Consumed only while the page says pick mode is armed.
-            // NOTE: the event lives on the controller, not on CoreWebView2.
-            try
-            {
-                var controller = core.Controller;
-                if (controller != null)
-                    controller.AcceleratorKeyPressed += (s, e) =>
-                    {
-                        try
-                        {
-                            if ((uint)e.VirtualKey == 0x1B && (PickEscPressed?.Invoke() == true)) e.Handled = true;
-                        }
-                        catch { }
-                    };
-            }
-            catch { }
-            // XAML-level fallback: catches Esc when focus is on the shell
-            // chrome rather than inside web content.
+            // Esc exits: the page's own Esc listener covers web focus; this
+            // XAML-level fallback catches Esc when focus is on the shell
+            // chrome. (This SDK's CoreWebView2 exposes neither
+            // AcceleratorKeyPressed nor Controller, so no browser-level
+            // hook — iframe-focus Esc stays a known gap, parked with the
+            // document-created injection item.)
             try
             {
                 wv.KeyDown += (s, e) =>
