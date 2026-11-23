@@ -19,6 +19,8 @@ Double-click HomeDeck.msix → Install.
 
 NOTES
 -----
+- The certificate stays the SAME across updates (pinned signing identity),
+  so Step 1 is once ever — updates are just the msix double-click.
 - SmartScreen may show an "unknown publisher" warning on first run
   (we have no download reputation yet). Click "More info" → "Run anyway",
   once — it learns.
