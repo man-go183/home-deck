@@ -94,6 +94,14 @@
           <VerticalStackLayout x:Name="AdsPanelBody" Spacing="8" />
         </ScrollView>
       </Border>
+      <!-- native pick-mode exit: lives outside the page, always clickable
+           even when focus is buried in a fullscreen frame -->
+      <Button x:Name="PickCancelBtn" Text="✕ Cancel picking" IsVisible="false"
+              BackgroundColor="#161311" TextColor="{StaticResource HdGold}"
+              BorderColor="{StaticResource HdGold}" BorderWidth="1"
+              CornerRadius="14" FontSize="13" Padding="14,7" Margin="0,8,0,0"
+              HorizontalOptions="Center" VerticalOptions="Start"
+              Clicked="OnPickCancel" />
     </Grid>
   </Grid>
 </ContentPage>
