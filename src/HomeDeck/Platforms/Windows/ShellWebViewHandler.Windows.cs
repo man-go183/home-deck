@@ -15,10 +15,16 @@ public partial class ShellWebViewHandler
 {
     AdBlockService? _ads;
     Microsoft.UI.Xaml.Controls.WebView2? _wv;
+    Microsoft.Web.WebView2.Core.CoreWebView2? _core;
+    string? _autoArmId;
 
     /// <summary>True when consumed: pick mode was armed and is now
     /// cancelled. Wired by the page (it owns the armed flag).</summary>
     public Func<bool>? PickEscPressed;
+
+    /// <summary>Global pick-mode exit requested from any frame (Esc).
+    /// Wired by the page to its shared cancel.</summary>
+    public Action? PickCancelRequested;
 
     /// <summary>Fired (off the UI thread) after every cosmetic count pass,
     /// including the late one. Wired by the page to refresh open UI.</summary>
@@ -34,8 +40,42 @@ public partial class ShellWebViewHandler
 
     protected override void DisconnectHandler(Microsoft.UI.Xaml.Controls.WebView2 platformView)
     {
+        try { DisarmFrames(); } catch { }
+        _core = null;
         if (_wv == platformView) _wv = null;
         base.DisconnectHandler(platformView);
+    }
+
+    /// <summary>Best-effort frame reach: same-origin recursion now, plus an
+    /// auto-arm snippet so frames created while armed start themselves.
+    /// Never throws; never fails the arm.</summary>
+    private partial async Task ArmFramesAsync()
+    {
+        try { await EvalJsAsync(ArmFramesJs); } catch { }
+        try
+        {
+            var core = _core;
+            if (core == null) return;
+            if (_autoArmId != null)
+            {
+                try { core.RemoveScriptToExecuteOnDocumentCreated(_autoArmId); } catch { }
+                _autoArmId = null;
+            }
+            _autoArmId = await core.AddScriptToExecuteOnDocumentCreatedAsync(AutoArmJs);
+        }
+        catch { }
+    }
+
+    partial void DisarmFrames()
+    {
+        try
+        {
+            var core = _core;
+            var id = _autoArmId;
+            _autoArmId = null;
+            if (core != null && id != null) core.RemoveScriptToExecuteOnDocumentCreated(id);
+        }
+        catch { }
     }
 
     /// <summary>No-op: WinUI exposes cursor only via the protected
@@ -76,11 +116,13 @@ public partial class ShellWebViewHandler
         {
             await wv.EnsureCoreWebView2Async();
             var core = wv.CoreWebView2!;
+            _core = core;
 
             core.AddHostObjectToScript("HomeDeckNative",
                 new HomeDeckHostObject(msg =>
                     MainThread.BeginInvokeOnMainThread(
-                        () => { _ = wv.ExecuteScriptAsync($"window.__hdResolveMsg({msg})"); }), _ads));
+                        () => { _ = wv.ExecuteScriptAsync($"window.__hdResolveMsg({msg})"); }), _ads,
+                    () => { try { PickCancelRequested?.Invoke(); } catch { } }));
 
             core.AddWebResourceRequestedFilter("*", Microsoft.Web.WebView2.Core.CoreWebView2WebResourceContext.All);
             // Element picker reports (shell.js postMessage {type:"hd-pick"}).
@@ -104,6 +146,9 @@ public partial class ShellWebViewHandler
                             root.TryGetProperty("host", out var h) ? h.GetString() ?? "" : "",
                             root.TryGetProperty("selector", out var x) ? x.GetString() ?? "" : "",
                             root.TryGetProperty("action", out var a) ? a.GetString() ?? "hide" : "hide");
+                    else if (root.ValueKind == JsonValueKind.Object
+                        && root.TryGetProperty("type", out var c) && c.GetString() == "hd-cancel")
+                        try { PickCancelRequested?.Invoke(); } catch { }
                     else _ads?.NoteReportError("report: unexpected pick message shape");
                 }
                 catch (Exception ex) { try { _ads?.NoteReportError("report: bad pick message (" + ex.GetType().Name + ")"); } catch { } }
@@ -148,6 +193,12 @@ public partial class ShellWebViewHandler
             using var st = await FileSystem.OpenAppPackageFileAsync("shell.js");
             using var r = new StreamReader(st);
             var js = await r.ReadToEndAsync();
+            // Permanent document-created injection: every frame (including
+            // cross-origin iframes the top-frame eval can't reach) gets the
+            // bridge + pick module + Esc + remove-mode at creation. The
+            // NavigationCompleted eval below stays as the DOM-ready top pass
+            // (double injection is safe: every shell.js section self-guards).
+            try { await core.AddScriptToExecuteOnDocumentCreatedAsync(js); } catch { }
             core.NavigationCompleted += async (_, _) =>
             {
                 try { await wv.ExecuteScriptAsync(js); } catch { }
