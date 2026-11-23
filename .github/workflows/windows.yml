@@ -83,7 +83,7 @@ jobs:
       - name: Collect MSIX bundle
         shell: pwsh
         run: |
-          $msix = Get-ChildItem src/HomeDeck/bin/Release/net10.0-windows10.0.19041.0 -Recurse -File -Filter "*.msix" | Select-Object -First 1
+          $msix = Get-ChildItem src/HomeDeck/AppPackages -Recurse -File -Filter "*.msix" | Select-Object -First 1
           if (-not $msix) { throw "msix not found" }
           New-Item -ItemType Directory -Force out-msix | Out-Null
           Copy-Item $msix.FullName out-msix/HomeDeck.msix
