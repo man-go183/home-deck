@@ -18,11 +18,13 @@ class HomeDeckJsBridge : Java.Lang.Object
 {
     readonly WeakReference<ShellWebView> _view;
     readonly AdBlockService _ads;
+    readonly Action _onCancel;
 
-    public HomeDeckJsBridge(ShellWebView view, AdBlockService ads)
+    public HomeDeckJsBridge(ShellWebView view, AdBlockService ads, Action? onCancel = null)
     {
         _view = new WeakReference<ShellWebView>(view);
         _ads = ads;
+        _onCancel = onCancel ?? (() => { });
     }
 
     void Resolve(string id, string json)
@@ -53,6 +55,13 @@ class HomeDeckJsBridge : Java.Lang.Object
     public void ReportRemoved(string host, string selector)
     {
         try { _ads.ReportPickerPick(host, selector, "remove"); } catch { }
+    }
+
+    /// <summary>Frame Esc exit: any frame ends pick mode for the whole shell.</summary>
+    [Android.Webkit.JavascriptInterface, Java.Interop.Export("reportCancel")]
+    public void ReportCancel()
+    {
+        try { _onCancel(); } catch { }
     }
 
     /// <summary>Sync answer to page JS: remove-mode selectors for a host
