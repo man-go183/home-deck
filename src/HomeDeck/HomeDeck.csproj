@@ -24,7 +24,7 @@
   </ItemGroup>
 
   <ItemGroup Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'windows'">
-    <Content Include="Platforms\Windows\Assets\*.png" />
+    <Content Include="Platforms\Windows\Assets\*.png" Link="Assets\%(Filename)%(Extension)" />
     <MauiXaml Remove="Platforms\Windows\App.xaml" />
     <!-- WMI brightness control (internal displays) -->
     <PackageReference Include="System.Management" Version="9.0.0" />
