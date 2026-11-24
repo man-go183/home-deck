@@ -2,8 +2,10 @@ name: windows
 
 # Manual only: run from the Actions tab when the code is ready.
 # Nothing builds on push/upload.
-# Two artifacts: unpackaged exe (no identity: brightness + files + classic
-# WiFi/BT details only) and MSIX sideload (full powers).
+# One artifact: unpackaged exe (no identity: brightness + files + classic
+# WiFi/BT details only). The MSIX sideload job is DISABLED (activation
+# parked — it installs but never launches; exe is the test vehicle).
+# Last working MSIX config is in git history.
 on:
   workflow_dispatch:
 
@@ -43,67 +45,3 @@ jobs:
         with:
           name: homedeck-windows
           path: out-homedeck-windows.zip
-
-  # Packaged MSIX for sideloading (self-signed). Needed for capabilities
-  # that require package identity: notification-listener, bluetooth,
-  # location. Users install CERT-INSTALL.txt's cert once, then the msix.
-  msix:
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up .NET 10
-        uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: 10.0.x
-
-      - name: Install MAUI workload
-        run: dotnet workload install maui-windows
-
-      - name: Build native blocker (Rust)
-        shell: pwsh
-        run: |
-          cargo build --release --manifest-path src/native/hdblock/Cargo.toml
-          New-Item -ItemType Directory -Force src/HomeDeck/runtimes/win-x64/native | Out-Null
-          Copy-Item src/native/hdblock/target/release/hdblock.dll src/HomeDeck/runtimes/win-x64/native/hdblock.dll
-
-      - name: Create self-signed cert (CN must match appxmanifest Publisher)
-        shell: pwsh
-        run: |
-          if ("${{ secrets.HD_MSIX_PFX_B64 }}" -ne "") {
-            # Stable signing identity: same cert every build, users trust once ever.
-            $pfxBytes = [Convert]::FromBase64String("${{ secrets.HD_MSIX_PFX_B64 }}")
-            [IO.File]::WriteAllBytes("sig.pfx", $pfxBytes)
-            $cert = Import-PfxCertificate -FilePath sig.pfx -CertStoreLocation "Cert:\CurrentUser\My" `
-              -Password (ConvertTo-SecureString "${{ secrets.HD_MSIX_PWD }}" -AsPlainText -Force)
-            Export-Certificate -Cert $cert -FilePath out-HomeDeck.cer | Out-Null
-          } else {
-            # Fallback: fresh cert per build (users re-trust on every update).
-            $cert = New-SelfSignedCertificate -Type Custom -Subject "CN=HomeDeck" `
-              -KeyUsage DigitalSignature -FriendlyName "HomeDeck Sideload" `
-              -CertStoreLocation "Cert:\CurrentUser\My" `
-              -NotAfter (Get-Date).AddYears(10) `
-              -KeyAlgorithm RSA -KeyLength 2048 -HashAlgorithm SHA256 `
-              -TextExtension @("2.5.29.37={text}1.3.6.1.5.5.7.3.3")
-            Export-Certificate -Cert $cert -FilePath out-HomeDeck.cer | Out-Null
-          }
-          "THUMB=$($cert.Thumbprint)" | Out-File $env:GITHUB_ENV -Append
-
-      - name: Publish MSIX
-        run: dotnet publish src/HomeDeck/HomeDeck.csproj -f net10.0-windows10.0.19041.0 -c Release -p:WindowsPackageType=MSIX -p:AppxPackageSigningEnabled=true -p:PackageCertificateThumbprint=${{ env.THUMB }}
-
-      - name: Collect MSIX bundle
-        shell: pwsh
-        run: |
-          $msix = Get-ChildItem src/HomeDeck/AppPackages -Recurse -File -Filter "*.msix" | Select-Object -First 1
-          if (-not $msix) { throw "msix not found" }
-          New-Item -ItemType Directory -Force out-msix | Out-Null
-          Copy-Item $msix.FullName out-msix/HomeDeck.msix
-          Copy-Item out-HomeDeck.cer out-msix/HomeDeck.cer
-          Copy-Item CERT-INSTALL.txt out-msix/CERT-INSTALL.txt
-
-      - name: Upload MSIX bundle
-        uses: actions/upload-artifact@v4
-        with:
-          name: homedeck-windows-msix
-          path: out-msix/*
