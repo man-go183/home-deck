@@ -112,23 +112,59 @@ public partial class ShellWebViewHandler
 
     async Task InitAsync(Microsoft.UI.Xaml.Controls.WebView2 wv, ShellWebView view)
     {
+        // Engine first (thread-safe). A failure here used to vanish into
+        // the outer catch and leave pages with no host object and no
+        // injected bridge — silent "waiting for bridge…" on device.
+        try { await wv.EnsureCoreWebView2Async(); }
+        catch (Exception e) { NoteInitError("engine", e); return; }
+
+        // shell.js is plain asset IO: read before hopping threads.
+        string? js = null;
         try
         {
-            await wv.EnsureCoreWebView2Async();
-            var core = wv.CoreWebView2!;
-            _core = core;
+            using var st = await FileSystem.OpenAppPackageFileAsync("shell.js");
+            using var r = new StreamReader(st);
+            js = await r.ReadToEndAsync();
+        }
+        catch (Exception e) { NoteInitError("shell.js", e); }
 
+        // CoreWebView2 registration must run on the UI thread that owns
+        // the core: the awaits above can resume on a worker, and
+        // AddHostObjectToScript throws off-thread — which used to abort the
+        // whole init (no host object, no injection, no ad-block).
+        try { await MainThread.InvokeOnMainThreadAsync(() => RegisterCoreAsync(wv, view, js)); }
+        catch (Exception e) { NoteInitError("register", e); }
+    }
+
+    /// <summary>UI-thread CoreWebView2 wiring. Every step is isolated: one
+    /// failure is recorded in BridgeInitError and the rest still run, so a
+    /// dead host object can no longer take the script injection (or the
+    /// ad-block filter) down with it.</summary>
+    async Task RegisterCoreAsync(Microsoft.UI.Xaml.Controls.WebView2 wv, ShellWebView view, string? js)
+    {
+        var core = wv.CoreWebView2;
+        if (core == null) { try { BridgeInitError ??= "bridge init: engine (no CoreWebView2)"; } catch { } return; }
+        _core = core;
+
+        try
+        {
             core.AddHostObjectToScript("HomeDeckNative",
                 new HomeDeckHostObject(msg =>
                     MainThread.BeginInvokeOnMainThread(
                         () => { _ = wv.ExecuteScriptAsync($"window.__hdResolveMsg({msg})"); }), _ads,
                     () => { try { PickCancelRequested?.Invoke(); } catch { } }));
+        }
+        catch (Exception e) { NoteInitError("host-object", e); }
 
-            core.AddWebResourceRequestedFilter("*", Microsoft.Web.WebView2.Core.CoreWebView2WebResourceContext.All);
-            // Element picker reports (shell.js postMessage {type:"hd-pick"}).
-            // Accepts the object directly; a JSON string gets unwrapped too
-            // (WebMessageAsJson double-wraps posted strings — that silent
-            // mismatch once ate every report).
+        try { core.AddWebResourceRequestedFilter("*", Microsoft.Web.WebView2.Core.CoreWebView2WebResourceContext.All); }
+        catch (Exception e) { NoteInitError("filter", e); }
+
+        // Element picker reports (shell.js postMessage {type:"hd-pick"}).
+        // Accepts the object directly; a JSON string gets unwrapped too
+        // (WebMessageAsJson double-wraps posted strings — that silent
+        // mismatch once ate every report).
+        try
+        {
             core.WebMessageReceived += (s, e) =>
             {
                 try
@@ -153,24 +189,28 @@ public partial class ShellWebViewHandler
                 }
                 catch (Exception ex) { try { _ads?.NoteReportError("report: bad pick message (" + ex.GetType().Name + ")"); } catch { } }
             };
-            // Esc exits: the page's own Esc listener covers web focus; this
-            // XAML-level fallback catches Esc when focus is on the shell
-            // chrome. (This SDK's CoreWebView2 exposes neither
-            // AcceleratorKeyPressed nor Controller, so no browser-level
-            // hook — iframe-focus Esc stays a known gap, parked with the
-            // document-created injection item.)
-            try
+        }
+        catch (Exception e) { NoteInitError("reports", e); }
+        // Esc exits: the page's own Esc listener covers web focus; this
+        // XAML-level fallback catches Esc when focus is on the shell
+        // chrome. (This SDK's CoreWebView2 exposes neither
+        // AcceleratorKeyPressed nor Controller, so no browser-level
+        // hook — iframe-focus Esc stays a known gap, parked with the
+        // document-created injection item.)
+        try
+        {
+            wv.KeyDown += (s, e) =>
             {
-                wv.KeyDown += (s, e) =>
+                try
                 {
-                    try
-                    {
-                        if (e.Key == Windows.System.VirtualKey.Escape && (PickEscPressed?.Invoke() == true)) e.Handled = true;
-                    }
-                    catch { }
-                };
-            }
-            catch { }
+                    if (e.Key == Windows.System.VirtualKey.Escape && (PickEscPressed?.Invoke() == true)) e.Handled = true;
+                }
+                catch { }
+            };
+        }
+        catch { }
+        try
+        {
             core.WebResourceRequested += (s, e) =>
             {
                 try
@@ -189,23 +229,25 @@ public partial class ShellWebViewHandler
                 }
                 catch { /* fail open */ }
             };
+        }
+        catch (Exception e) { NoteInitError("adblock", e); }
 
-            using var st = await FileSystem.OpenAppPackageFileAsync("shell.js");
-            using var r = new StreamReader(st);
-            var js = await r.ReadToEndAsync();
-            // Permanent document-created injection: every frame (including
-            // cross-origin iframes the top-frame eval can't reach) gets the
-            // bridge + pick module + Esc + remove-mode at creation. The
-            // NavigationCompleted eval below stays as the DOM-ready top pass
-            // (double injection is safe: every shell.js section self-guards).
-            try { await core.AddScriptToExecuteOnDocumentCreatedAsync(js); } catch { }
+        if (js == null) return;
+        // Permanent document-created injection: every frame (including
+        // cross-origin iframes the top-frame eval can't reach) gets the
+        // bridge + pick module + Esc + remove-mode at creation. The
+        // NavigationCompleted eval below stays as the DOM-ready top pass
+        // (double injection is safe: every shell.js section self-guards).
+        try { await core.AddScriptToExecuteOnDocumentCreatedAsync(js); } catch (Exception e) { NoteInitError("doc-created", e); }
+        try
+        {
             core.NavigationCompleted += async (_, _) =>
             {
                 try { await wv.ExecuteScriptAsync(js); } catch { }
                 try { await InjectCosmeticsAsync(wv, view); } catch { }
             };
         }
-        catch { /* WebView2 missing: page area stays blank, shell still runs */ }
+        catch (Exception e) { NoteInitError("nav-hook", e); }
     }
 
     async Task InjectCosmeticsAsync(

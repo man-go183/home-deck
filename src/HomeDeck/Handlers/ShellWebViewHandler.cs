@@ -70,6 +70,17 @@ public partial class ShellWebViewHandler : WebViewHandler
         try { _ = EvalJsAsync("window.HomeDeckPick&&window.HomeDeckPick.cancel()"); } catch { }
     }
 
+    /// <summary>First bridge-init failure (step + exception), else null.
+    /// Windows records it; the shield panel surfaces it so a dead bridge is
+    /// diagnosable on device instead of a silent "waiting for bridge…".</summary>
+    public string? BridgeInitError { get; protected set; }
+
+    /// <summary>Record the first init failure only; never throws.</summary>
+    protected void NoteInitError(string step, Exception e)
+    {
+        try { BridgeInitError ??= "bridge init: " + step + " (" + e.GetType().Name + ": " + Trunc(e.Message) + ")"; } catch { }
+    }
+
     static bool IsChanErr(string s) => s.StartsWith("THROW") || s == "TIMEOUT";
 
     static string Trunc(string? s, int n = 160)

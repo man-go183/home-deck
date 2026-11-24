@@ -738,6 +738,16 @@ public partial class BrowserPage : ContentPage
                 Padding = new Thickness(10, 2, 10, 0),
             });
         }
+        if (Web.Handler is ShellWebViewHandler hh && !string.IsNullOrEmpty(hh.BridgeInitError))
+        {
+            AdsPanelBody.Children.Add(new Label
+            {
+                Text = "Bridge: " + hh.BridgeInitError,
+                FontSize = 12,
+                TextColor = Color.FromArgb("#E14B32"),
+                Padding = new Thickness(10, 2, 10, 0),
+            });
+        }
         if (picks.Count == 0)
         {
             AdsPanelBody.Children.Add(new Label
