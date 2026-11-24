@@ -54,22 +54,30 @@
     });
   }
 
+  function pgHost() { try { return window.location.hostname || ""; } catch (e) { return ""; } }
+
   window.HomeDeck = {
     version: "hd/1",
     getBattery: () => callSync("getBattery"),
     getNetwork: () => callSync("getNetwork"),
     getDevice: () => callSync("getDevice"),
     vibrate: (ms) => callSync("vibrate", ms | 0),
-    getLocation: () => callAsync("getLocation"),
     bleScan: (seconds) => callAsync("bleScan", Math.max(1, Math.min(30, seconds | 0 || 8))),
     getNotifications: () => callAsync("getNotifications"),
     notificationAccess: () => callSync("notificationAccess"),
     openNotificationSettings: () => callAsync("openNotificationSettings"),
     getBrightness: () => callSync("getBrightness"),
     setBrightness: (level) => callSync("setBrightness", +level),
-    listDir: (path) => callAsync("listDir", path || ""),
-    fileInfo: (path) => callAsync("fileInfo", path || ""),
-    readFile: (path) => callAsync("readFile", path || ""),
+    openWifiSettings: () => callAsync("openWifiSettings"),
+    openBluetoothSettings: () => callAsync("openBluetoothSettings"),
+    pickFolder: () => callAsync("pickFolder"),
+    fileRoot: () => callSync("fileRoot"),
+    listDir: (path) => callAsync("listDir", pgHost(), path || ""),
+    fileInfo: (path) => callAsync("fileInfo", pgHost(), path || ""),
+    readFile: (path) => callAsync("readFile", pgHost(), path || ""),
+    writeFile: (path, base64) => callAsync("writeFile", pgHost(), path || "", base64 || ""),
+    deleteFile: (path) => callAsync("deleteFile", pgHost(), path || ""),
+    mkdir: (path) => callAsync("mkdir", pgHost(), path || ""),
     wifiScan: () => callAsync("wifiScan"),
     bluetoothDevices: (inquiry) => callAsync("bluetoothDevices", inquiry ? 1 : 0),
     shareText: (text, title) => callAsync("shareText", text || "", title || ""),

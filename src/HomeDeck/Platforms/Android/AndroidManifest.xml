@@ -1,16 +1,16 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
   <uses-sdk android:minSdkVersion="24" android:targetSdkVersion="34" />
-  <!-- v1 needs: network, vibration, notifications, keep-awake.
-       Location / BLE / media permissions serve the hd/1 bridge (runtime-
-       requested; declared here so the request can be granted). -->
+  <!-- BLE scan + media permissions serve the hd/1 bridge (runtime-
+       requested; declared here so the request can be granted).
+       No location: getLocation was dropped. BLE scan needs Android 12+
+       (older versions asked for location); notification-read needs the
+       listener opt-in from inside the app. -->
   <uses-permission android:name="android.permission.INTERNET" />
   <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
   <uses-permission android:name="android.permission.VIBRATE" />
   <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
   <uses-permission android:name="android.permission.WAKE_LOCK" />
-  <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
-  <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
   <uses-permission android:name="android.permission.BLUETOOTH_SCAN" android:usesPermissionFlags="neverForLocation" />
   <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
   <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />

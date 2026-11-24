@@ -110,9 +110,8 @@
               <FormattedString>
                 <Span Text="Battery — level, charging state&#10;" />
                 <Span Text="Bluetooth LE — scan, connect, read/write&#10;" />
-                <Span Text="Location — GPS position (asks first)&#10;" />
                 <Span Text="Camera &amp; microphone — capture, calls (asks first)&#10;" />
-                <Span Text="Files — open, save, private app storage&#10;" />
+                <Span Text="Files — one folder you pick; pages ask first&#10;" />
                 <Span Text="Notifications — local + scheduled (asks first)&#10;" />
                 <Span Text="Vibration — haptics patterns&#10;" />
                 <Span Text="Network — online status, connection type&#10;" />

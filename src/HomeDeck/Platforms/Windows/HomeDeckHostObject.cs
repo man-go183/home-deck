@@ -38,9 +38,6 @@ public class HomeDeckHostObject
     public string getDevice() => DeviceBridge.GetDevice();
     public string vibrate(int millis) => DeviceBridge.Vibrate(millis);
 
-    public void getLocation(string id)
-        => Task.Run(async () => _post(JsonPair(id, await DeviceBridge.GetLocationAsync())));
-
     public void bleScan(string id, int seconds)
         => Task.Run(async () =>
         {
@@ -141,6 +138,30 @@ public class HomeDeckHostObject
             catch (Exception e) { _post(JsonPair(id, "{\"ok\":false,\"error\":" + Q(e.Message) + "}")); }
         });
 
+    /// <summary>System settings deep-links: the app cannot flip radios
+    /// itself, so these open the OS page where the user flips the real
+    /// toggle. Same delegation pattern as openNotificationSettings.</summary>
+    public void openWifiSettings(string id)
+        => OpenSettingsPage(id, "ms-settings:network-wifi");
+
+    public void openBluetoothSettings(string id)
+        => OpenSettingsPage(id, "ms-settings:bluetooth");
+
+    void OpenSettingsPage(string id, string uri)
+        => Task.Run(() =>
+        {
+            try
+            {
+                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+                {
+                    FileName = uri,
+                    UseShellExecute = true
+                });
+                _post(JsonPair(id, "{\"ok\":true}"));
+            }
+            catch (Exception e) { _post(JsonPair(id, "{\"ok\":false,\"error\":" + Q(e.Message) + "}")); }
+        });
+
     /// <summary>Windows brightness: WMI for internal displays, DDC/CI for
     /// external. Per-machine — desktops with basic monitors answer to
     /// neither API and get an honest not-implemented.</summary>
@@ -186,27 +207,55 @@ public class HomeDeckHostObject
         catch (Exception e) { return "{\"ok\":false,\"error\":" + Q(e.Message) + "}"; }
     }
 
-    public void listDir(string id, string? path)
-        => Task.Run(() =>
+    /// <summary>Scoped file access: every op below is gated by HdFileGuard —
+    /// the path must sit under the app's HomeDeck root AND the calling site
+    /// must hold a grant (native allow/deny popup on first use).</summary>
+    public string fileRoot()
+    {
+        try { return "{\"ok\":true,\"data\":{\"root\":" + Q(HdFileGuard.Root) + "}}"; }
+        catch (Exception e) { return "{\"ok\":false,\"error\":" + Q(e.Message) + "}"; }
+    }
+
+    /// <summary>Change the scoped root. The OS folder picker IS the consent:
+    /// the user chose it with their own hands, so no site popup here. Every
+    /// read/write still needs that site's own grant.</summary>
+    public void pickFolder(string id)
+        => Task.Run(async () =>
         {
             try
             {
+                var result = await Microsoft.Maui.ApplicationModel.MainThread.InvokeOnMainThreadAsync(
+                    () => Microsoft.Maui.Storage.FolderPicker.Default.PickAsync());
+                string? path = result?.IsSuccessful == true ? result.Folder?.Path : null;
+                if (string.IsNullOrWhiteSpace(path) || !HdFileGuard.SetRoot(path))
+                { _post(JsonPair(id, "{\"ok\":false,\"error\":\"no-pick\"}")); return; }
+                _post(JsonPair(id, "{\"ok\":true,\"data\":{\"root\":" + Q(HdFileGuard.Root) + "}}"));
+            }
+            catch (Exception e) { _post(JsonPair(id, "{\"ok\":false,\"error\":" + Q(e.Message) + "}")); }
+        });
+
+    public void listDir(string id, string? host, string? path)
+        => Task.Run(async () =>
+        {
+            try
+            {
+                if (!await HdFileGuard.EnsureAccessAsync(host, "list files"))
+                { _post(JsonPair(id, "{\"ok\":false,\"error\":\"denied\"}")); return; }
                 if (string.IsNullOrWhiteSpace(path))
                 {
-                    var roots = System.IO.DriveInfo.GetDrives();
-                    var items = new System.Collections.Generic.List<object>();
-                    foreach (var d in roots)
+                    string root = HdFileGuard.Root;
+                    _post(JsonPair(id, System.Text.Json.JsonSerializer.Serialize(new
                     {
-                        try { items.Add(new { name = d.Name, path = d.RootDirectory.FullName, isDir = true }); }
-                        catch { }
-                    }
-                    _post(JsonPair(id, System.Text.Json.JsonSerializer.Serialize(new { ok = true, data = items })));
+                        ok = true,
+                        data = new[] { new { name = "HomeDeck", path = root, isDir = true } }
+                    })));
                     return;
                 }
-                if (!System.IO.Directory.Exists(path)) { _post(JsonPair(id, "{\"ok\":false,\"error\":\"no-dir\"}")); return; }
+                if (!HdFileGuard.IsUnderRoot(path, out var full) || !System.IO.Directory.Exists(full))
+                { _post(JsonPair(id, "{\"ok\":false,\"error\":\"no-dir\"}")); return; }
                 var list = new System.Collections.Generic.List<object>();
                 int n = 0;
-                foreach (var e in System.IO.Directory.EnumerateFileSystemEntries(path))
+                foreach (var e in System.IO.Directory.EnumerateFileSystemEntries(full))
                 {
                     if (n++ >= 2000) break;
                     try
@@ -223,44 +272,96 @@ public class HomeDeckHostObject
             catch (Exception e) { _post(JsonPair(id, "{\"ok\":false,\"error\":" + Q(e.Message) + "}")); }
         });
 
-    public void fileInfo(string id, string? path)
-        => Task.Run(() =>
+    public void fileInfo(string id, string? host, string? path)
+        => Task.Run(async () =>
         {
             try
             {
-                if (string.IsNullOrWhiteSpace(path)) { _post(JsonPair(id, "{\"ok\":false,\"error\":\"no-path\"}")); return; }
-                if (System.IO.Directory.Exists(path))
-                { _post(JsonPair(id, "{\"ok\":true,\"data\":{\"name\":\"" + System.IO.Path.GetFileName(path) + "\",\"isDir\":true,\"size\":-1}}")); return; }
-                if (!System.IO.File.Exists(path)) { _post(JsonPair(id, "{\"ok\":false,\"error\":\"not-found\"}")); return; }
-                var fi = new System.IO.FileInfo(path);
-                _post(JsonPair(id, "{\"ok\":true,\"data\":{\"name\":\"" + fi.Name + "\",\"isDir\":false,\"size\":" + fi.Length + "}}"));
+                if (!await HdFileGuard.EnsureAccessAsync(host, "read file info"))
+                { _post(JsonPair(id, "{\"ok\":false,\"error\":\"denied\"}")); return; }
+                if (!HdFileGuard.IsUnderRoot(path, out var full))
+                { _post(JsonPair(id, "{\"ok\":false,\"error\":\"outside-root\"}")); return; }
+                if (System.IO.Directory.Exists(full))
+                { _post(JsonPair(id, "{\"ok\":true,\"data\":{\"name\":" + Q(System.IO.Path.GetFileName(full)) + ",\"isDir\":true,\"size\":-1}}")); return; }
+                if (!System.IO.File.Exists(full)) { _post(JsonPair(id, "{\"ok\":false,\"error\":\"not-found\"}")); return; }
+                var fi = new System.IO.FileInfo(full);
+                _post(JsonPair(id, "{\"ok\":true,\"data\":{\"name\":" + Q(fi.Name) + ",\"isDir\":false,\"size\":" + fi.Length + "}}"));
             }
             catch (Exception e) { _post(JsonPair(id, "{\"ok\":false,\"error\":" + Q(e.Message) + "}")); }
         });
 
-    /// <summary>Classic Win32 radio details (no identity needed — works
-    /// unpackaged too). WiFi current + nearby, BT radios + devices.</summary>
-    public void wifiScan(string id)
-        => Task.Run(() => _post(JsonPair(id, LegacyRadioInfo.WifiScan())));
-
-    public void bluetoothDevices(string id, int inquiry)
-        => Task.Run(() => _post(JsonPair(id, LegacyRadioInfo.BluetoothDevices(inquiry != 0))));
-
-    public void readFile(string id, string? path)
-        => Task.Run(() =>
+    public void readFile(string id, string? host, string? path)
+        => Task.Run(async () =>
         {
             try
             {
-                if (string.IsNullOrWhiteSpace(path) || !System.IO.File.Exists(path))
+                if (!await HdFileGuard.EnsureAccessAsync(host, "read files"))
+                { _post(JsonPair(id, "{\"ok\":false,\"error\":\"denied\"}")); return; }
+                if (!HdFileGuard.IsUnderRoot(path, out var full) || !System.IO.File.Exists(full))
                 { _post(JsonPair(id, "{\"ok\":false,\"error\":\"not-found\"}")); return; }
-                var fi = new System.IO.FileInfo(path);
+                var fi = new System.IO.FileInfo(full);
                 if (fi.Length > 8L * 1024 * 1024) { _post(JsonPair(id, "{\"ok\":false,\"error\":\"too-big\"}")); return; }
-                byte[] bytes = System.IO.File.ReadAllBytes(path);
+                byte[] bytes = System.IO.File.ReadAllBytes(full);
                 _post(JsonPair(id, System.Text.Json.JsonSerializer.Serialize(new
                 {
                     ok = true,
                     data = new { name = fi.Name, size = (long)bytes.Length, base64 = Convert.ToBase64String(bytes) }
                 })));
+            }
+            catch (Exception e) { _post(JsonPair(id, "{\"ok\":false,\"error\":" + Q(e.Message) + "}")); }
+        });
+
+    public void writeFile(string id, string? host, string? path, string? base64)
+        => Task.Run(async () =>
+        {
+            try
+            {
+                if (!await HdFileGuard.EnsureAccessAsync(host, "write files"))
+                { _post(JsonPair(id, "{\"ok\":false,\"error\":\"denied\"}")); return; }
+                if (!HdFileGuard.IsUnderRoot(path, out var full))
+                { _post(JsonPair(id, "{\"ok\":false,\"error\":\"outside-root\"}")); return; }
+                if (string.IsNullOrEmpty(base64) || base64.Length > 12L * 1024 * 1024)
+                { _post(JsonPair(id, "{\"ok\":false,\"error\":\"too-big\"}")); return; }
+                byte[] bytes;
+                try { bytes = Convert.FromBase64String(base64); }
+                catch { _post(JsonPair(id, "{\"ok\":false,\"error\":\"bad-base64\"}")); return; }
+                if (bytes.Length > 8L * 1024 * 1024) { _post(JsonPair(id, "{\"ok\":false,\"error\":\"too-big\"}")); return; }
+                try { System.IO.Directory.CreateDirectory(System.IO.Path.GetDirectoryName(full) ?? HdFileGuard.Root); }
+                catch { _post(JsonPair(id, "{\"ok\":false,\"error\":\"no-dir\"}")); return; }
+                System.IO.File.WriteAllBytes(full, bytes);
+                _post(JsonPair(id, "{\"ok\":true,\"data\":{\"size\":" + bytes.Length + "}}"));
+            }
+            catch (Exception e) { _post(JsonPair(id, "{\"ok\":false,\"error\":" + Q(e.Message) + "}")); }
+        });
+
+    public void mkdir(string id, string? host, string? path)
+        => Task.Run(async () =>
+        {
+            try
+            {
+                if (!await HdFileGuard.EnsureAccessAsync(host, "create folders"))
+                { _post(JsonPair(id, "{\"ok\":false,\"error\":\"denied\"}")); return; }
+                if (!HdFileGuard.IsUnderRoot(path, out var full))
+                { _post(JsonPair(id, "{\"ok\":false,\"error\":\"outside-root\"}")); return; }
+                System.IO.Directory.CreateDirectory(full);
+                _post(JsonPair(id, "{\"ok\":true}"));
+            }
+            catch (Exception e) { _post(JsonPair(id, "{\"ok\":false,\"error\":" + Q(e.Message) + "}")); }
+        });
+
+    public void deleteFile(string id, string? host, string? path)
+        => Task.Run(async () =>
+        {
+            try
+            {
+                if (!await HdFileGuard.EnsureAccessAsync(host, "delete files"))
+                { _post(JsonPair(id, "{\"ok\":false,\"error\":\"denied\"}")); return; }
+                if (!HdFileGuard.IsUnderRoot(path, out var full))
+                { _post(JsonPair(id, "{\"ok\":false,\"error\":\"outside-root\"}")); return; }
+                if (System.IO.File.Exists(full)) System.IO.File.Delete(full);
+                else if (System.IO.Directory.Exists(full)) System.IO.Directory.Delete(full, false);
+                else { _post(JsonPair(id, "{\"ok\":false,\"error\":\"not-found\"}")); return; }
+                _post(JsonPair(id, "{\"ok\":true}"));
             }
             catch (Exception e) { _post(JsonPair(id, "{\"ok\":false,\"error\":" + Q(e.Message) + "}")); }
         });

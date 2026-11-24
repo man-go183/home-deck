@@ -124,19 +124,9 @@ class HomeDeckJsBridge : Java.Lang.Object
                 : new[] { ("android.permission.READ_EXTERNAL_STORAGE", true) };
     }
 
-    [Android.Webkit.JavascriptInterface, Java.Interop.Export("getLocation")]
-    public void GetLocation(string id)
-        => Task.Run(async () =>
-        {
-            try
-            {
-                var st = await Permissions.RequestAsync<Permissions.LocationWhenInUse>();
-                if (st != PermissionStatus.Granted) { Resolve(id, "{\"ok\":false,\"error\":\"denied\"}"); return; }
-                Resolve(id, await DeviceBridge.GetLocationAsync());
-            }
-            catch (Exception e) { Resolve(id, "{\"ok\":false,\"error\":" + JsonQuote(e.Message) + "}"); }
-        });
-
+    // Note: the pre-31 scan fallback asks for location, which the manifest
+    // no longer declares (getLocation was dropped) — those old devices get
+    // a clean denied from bleScan.
     class HdScanCallback : Android.Bluetooth.LE.ScanCallback
     {
         readonly Dictionary<string, (string name, int rssi)> _seen;
@@ -214,6 +204,38 @@ class HomeDeckJsBridge : Java.Lang.Object
             catch (Exception e) { Resolve(id, "{\"ok\":false,\"error\":" + JsonQuote(e.Message) + "}"); }
         });
 
+    [Android.Webkit.JavascriptInterface, Java.Interop.Export("openWifiSettings")]
+    public void OpenWifiSettings(string id)
+        => Task.Run(() =>
+        {
+            try
+            {
+                var activity = Platform.CurrentActivity;
+                if (activity == null) { Resolve(id, "{\"ok\":false,\"error\":\"no-activity\"}"); return; }
+                var intent = new Android.Content.Intent(Android.Provider.Settings.ActionWifiSettings);
+                intent.AddFlags(Android.Content.ActivityFlags.NewTask);
+                activity.StartActivity(intent);
+                Resolve(id, "{\"ok\":true}");
+            }
+            catch (Exception e) { Resolve(id, "{\"ok\":false,\"error\":" + JsonQuote(e.Message) + "}"); }
+        });
+
+    [Android.Webkit.JavascriptInterface, Java.Interop.Export("openBluetoothSettings")]
+    public void OpenBluetoothSettings(string id)
+        => Task.Run(() =>
+        {
+            try
+            {
+                var activity = Platform.CurrentActivity;
+                if (activity == null) { Resolve(id, "{\"ok\":false,\"error\":\"no-activity\"}"); return; }
+                var intent = new Android.Content.Intent(Android.Provider.Settings.ActionBluetoothSettings);
+                intent.AddFlags(Android.Content.ActivityFlags.NewTask);
+                activity.StartActivity(intent);
+                Resolve(id, "{\"ok\":true}");
+            }
+            catch (Exception e) { Resolve(id, "{\"ok\":false,\"error\":" + JsonQuote(e.Message) + "}"); }
+        });
+
     [Android.Webkit.JavascriptInterface, Java.Interop.Export("getNotifications")]
     public void GetNotifications(string id)
         => Task.Run(() =>
@@ -265,29 +287,67 @@ class HomeDeckJsBridge : Java.Lang.Object
         catch { return null; }
     }
 
-    [Android.Webkit.JavascriptInterface, Java.Interop.Export("listDir")]
-    public void ListDir(string id, string? path)
+    static string JsonRaw(string? v)
+        => System.Text.Json.JsonSerializer.Serialize(v ?? "");
+
+    static bool UnderRoot(string? path, out string full)
+    {
+        full = "";
+        try
+        {
+            if (string.IsNullOrWhiteSpace(path)) return false;
+            string canon;
+            try { canon = new Java.IO.File(path).CanonicalPath ?? ""; }
+            catch { return false; }
+            return HdFileGuard.IsUnderRoot(canon, out full);
+        }
+        catch { return false; }
+    }
+
+    [Android.Webkit.JavascriptInterface, Java.Interop.Export("fileRoot")]
+    public string FileRoot()
+    {
+        try { return "{\"ok\":true,\"data\":{\"root\":" + JsonRaw(HdFileGuard.Root) + "}}"; }
+        catch (Exception e) { return "{\"ok\":false,\"error\":" + JsonRaw(e.Message) + "}"; }
+    }
+
+    [Android.Webkit.JavascriptInterface, Java.Interop.Export("pickFolder")]
+    public void PickFolder(string id)
         => Task.Run(async () =>
         {
             try
             {
+                var result = await MainThread.InvokeOnMainThreadAsync(
+                    () => Microsoft.Maui.Storage.FolderPicker.Default.PickAsync());
+                string? path = result?.IsSuccessful == true ? result.Folder?.Path : null;
+                if (string.IsNullOrWhiteSpace(path) || !HdFileGuard.SetRoot(path))
+                { Resolve(id, "{\"ok\":false,\"error\":\"no-pick\"}"); return; }
+                Resolve(id, "{\"ok\":true,\"data\":{\"root\":" + JsonRaw(HdFileGuard.Root) + "}}");
+            }
+            catch (Exception e) { Resolve(id, "{\"ok\":false,\"error\":" + JsonQuote(e.Message) + "}"); }
+        });
+
+    [Android.Webkit.JavascriptInterface, Java.Interop.Export("listDir")]
+    public void ListDir(string id, string? host, string? path)
+        => Task.Run(async () =>
+        {
+            try
+            {
+                if (!await HdFileGuard.EnsureAccessAsync(host, "list files"))
+                { Resolve(id, "{\"ok\":false,\"error\":\"denied\"}"); return; }
                 if (string.IsNullOrWhiteSpace(path))
                 {
-                    var roots = new List<object>();
-                    try
+                    string root = HdFileGuard.Root;
+                    Resolve(id, System.Text.Json.JsonSerializer.Serialize(new
                     {
-                        var ctx = Platform.AppContext;
-                        roots.Add(new { name = "App files", path = ctx.FilesDir?.AbsolutePath ?? "", isDir = true });
-                        roots.Add(new { name = "Cache", path = ctx.CacheDir?.AbsolutePath ?? "", isDir = true });
-                    }
-                    catch { }
-                    foreach (var d in new[] { PublicDir(Android.OS.Environment.DirectoryDownloads), PublicDir(Android.OS.Environment.DirectoryDcim) })
-                        if (!string.IsNullOrEmpty(d)) roots.Add(new { name = new Java.IO.File(d).Name, path = d, isDir = true });
-                    Resolve(id, System.Text.Json.JsonSerializer.Serialize(new { ok = true, data = roots }));
+                        ok = true,
+                        data = new[] { new { name = "HomeDeck", path = root, isDir = true } }
+                    }));
                     return;
                 }
+                if (!UnderRoot(path, out var full)) { Resolve(id, "{\"ok\":false,\"error\":\"outside-root\"}"); return; }
                 try { await Permissions.RequestAsync<MediaReadPermission>(); } catch { }
-                var dir = new Java.IO.File(path);
+                var dir = new Java.IO.File(full);
                 if (!dir.Exists() || !dir.IsDirectory) { Resolve(id, "{\"ok\":false,\"error\":\"no-dir\"}"); return; }
                 var files = dir.ListFiles() ?? Array.Empty<Java.IO.File>();
                 var list = new List<object>();
@@ -305,13 +365,15 @@ class HomeDeckJsBridge : Java.Lang.Object
         });
 
     [Android.Webkit.JavascriptInterface, Java.Interop.Export("fileInfo")]
-    public void FileInfo(string id, string? path)
-        => Task.Run(() =>
+    public void FileInfo(string id, string? host, string? path)
+        => Task.Run(async () =>
         {
             try
             {
-                if (string.IsNullOrWhiteSpace(path)) { Resolve(id, "{\"ok\":false,\"error\":\"no-path\"}"); return; }
-                var f = new Java.IO.File(path);
+                if (!await HdFileGuard.EnsureAccessAsync(host, "read file info"))
+                { Resolve(id, "{\"ok\":false,\"error\":\"denied\"}"); return; }
+                if (!UnderRoot(path, out var full)) { Resolve(id, "{\"ok\":false,\"error\":\"outside-root\"}"); return; }
+                var f = new Java.IO.File(full);
                 if (!f.Exists()) { Resolve(id, "{\"ok\":false,\"error\":\"not-found\"}"); return; }
                 bool isDir = f.IsDirectory;
                 Resolve(id, System.Text.Json.JsonSerializer.Serialize(new
@@ -324,13 +386,15 @@ class HomeDeckJsBridge : Java.Lang.Object
         });
 
     [Android.Webkit.JavascriptInterface, Java.Interop.Export("readFile")]
-    public void ReadFile(string id, string? path)
-        => Task.Run(() =>
+    public void ReadFile(string id, string? host, string? path)
+        => Task.Run(async () =>
         {
             try
             {
-                if (string.IsNullOrWhiteSpace(path)) { Resolve(id, "{\"ok\":false,\"error\":\"no-path\"}"); return; }
-                var f = new Java.IO.File(path);
+                if (!await HdFileGuard.EnsureAccessAsync(host, "read files"))
+                { Resolve(id, "{\"ok\":false,\"error\":\"denied\"}"); return; }
+                if (!UnderRoot(path, out var full)) { Resolve(id, "{\"ok\":false,\"error\":\"outside-root\"}"); return; }
+                var f = new Java.IO.File(full);
                 if (!f.Exists() || f.IsDirectory) { Resolve(id, "{\"ok\":false,\"error\":\"not-found\"}"); return; }
                 if (f.Length() > 8L * 1024 * 1024) { Resolve(id, "{\"ok\":false,\"error\":\"too-big\"}"); return; }
                 byte[] bytes = System.IO.File.ReadAllBytes(f.AbsolutePath);
@@ -339,6 +403,62 @@ class HomeDeckJsBridge : Java.Lang.Object
                     ok = true,
                     data = new { name = f.Name ?? "", size = (long)bytes.Length, base64 = Convert.ToBase64String(bytes) }
                 }));
+            }
+            catch (Exception e) { Resolve(id, "{\"ok\":false,\"error\":" + JsonQuote(e.Message) + "}"); }
+        });
+
+    [Android.Webkit.JavascriptInterface, Java.Interop.Export("writeFile")]
+    public void WriteFile(string id, string? host, string? path, string? base64)
+        => Task.Run(async () =>
+        {
+            try
+            {
+                if (!await HdFileGuard.EnsureAccessAsync(host, "write files"))
+                { Resolve(id, "{\"ok\":false,\"error\":\"denied\"}"); return; }
+                if (!UnderRoot(path, out var full)) { Resolve(id, "{\"ok\":false,\"error\":\"outside-root\"}"); return; }
+                if (string.IsNullOrEmpty(base64) || base64.Length > 12L * 1024 * 1024)
+                { Resolve(id, "{\"ok\":false,\"error\":\"too-big\"}"); return; }
+                byte[] bytes;
+                try { bytes = Convert.FromBase64String(base64); }
+                catch { Resolve(id, "{\"ok\":false,\"error\":\"bad-base64\"}"); return; }
+                if (bytes.Length > 8L * 1024 * 1024) { Resolve(id, "{\"ok\":false,\"error\":\"too-big\"}"); return; }
+                try { System.IO.Directory.CreateDirectory(System.IO.Path.GetDirectoryName(full) ?? HdFileGuard.Root); }
+                catch { Resolve(id, "{\"ok\":false,\"error\":\"no-dir\"}"); return; }
+                System.IO.File.WriteAllBytes(full, bytes);
+                Resolve(id, "{\"ok\":true,\"data\":{\"size\":" + bytes.Length + "}}");
+            }
+            catch (Exception e) { Resolve(id, "{\"ok\":false,\"error\":" + JsonQuote(e.Message) + "}"); }
+        });
+
+    [Android.Webkit.JavascriptInterface, Java.Interop.Export("mkdir")]
+    public void Mkdir(string id, string? host, string? path)
+        => Task.Run(async () =>
+        {
+            try
+            {
+                if (!await HdFileGuard.EnsureAccessAsync(host, "create folders"))
+                { Resolve(id, "{\"ok\":false,\"error\":\"denied\"}"); return; }
+                if (!UnderRoot(path, out var full)) { Resolve(id, "{\"ok\":false,\"error\":\"outside-root\"}"); return; }
+                System.IO.Directory.CreateDirectory(full);
+                Resolve(id, "{\"ok\":true}");
+            }
+            catch (Exception e) { Resolve(id, "{\"ok\":false,\"error\":" + JsonQuote(e.Message) + "}"); }
+        });
+
+    [Android.Webkit.JavascriptInterface, Java.Interop.Export("deleteFile")]
+    public void DeleteFile(string id, string? host, string? path)
+        => Task.Run(async () =>
+        {
+            try
+            {
+                if (!await HdFileGuard.EnsureAccessAsync(host, "delete files"))
+                { Resolve(id, "{\"ok\":false,\"error\":\"denied\"}"); return; }
+                if (!UnderRoot(path, out var full)) { Resolve(id, "{\"ok\":false,\"error\":\"outside-root\"}"); return; }
+                if (System.IO.File.Exists(full)) System.IO.File.Delete(full);
+                else if (System.IO.Directory.Exists(full) && System.IO.Directory.GetFileSystemEntries(full).Length == 0)
+                    System.IO.Directory.Delete(full);
+                else { Resolve(id, "{\"ok\":false,\"error\":\"not-found\"}"); return; }
+                Resolve(id, "{\"ok\":true}");
             }
             catch (Exception e) { Resolve(id, "{\"ok\":false,\"error\":" + JsonQuote(e.Message) + "}"); }
         });

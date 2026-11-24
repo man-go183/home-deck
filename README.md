@@ -38,22 +38,27 @@ Pages feature-detect: `if (window.HomeDeck) …`. Every call resolves
 `{ok:true, data?…}` or `{ok:false, error}`. `not-implemented: x` = surface
 exists, capability lands later.
 
-| call | v1 status |
+| call | status |
 |---|---|
 | `getBattery()` | ✅ level / state / source |
 | `getNetwork()` | ✅ access + connection profiles |
 | `getDevice()` | ✅ model / OS / bridge version |
-| `vibrate(ms)` | ✅ |
+| `vibrate(ms)` | ✅ (Android; no hardware on Windows) |
 | `shareText(text, title)` | ✅ system sheet |
 | `clipboardWrite/read()` | ✅ |
-| `notify(title, body)` | ✅ local, permission-gated (Android 13+ / iOS-style prompt) |
-| `setBrightness(level)` | ✅ Android app-level only (restores on exit) |
-| `getLocation()` | ✅ one-shot lat/lon/accuracy (runtime permission) |
-| `bleScan(seconds)` | ✅ name/RSSI scan-only list (runtime permission; Win needs MSIX) |
-| `getNotifications()` | ✅ read access (Android listener opt-in; Win UNL grant, MSIX) |
-| `notificationAccess()` / `openNotificationSettings()` | ✅ enabled-check + settings deep-link |
+| `notify(title, body)` | ✅ local, permission-gated (Android 13+ prompt) |
 | `getBrightness()` / `setBrightness(level)` | ✅ Android in-app window; Win WMI per-machine (fail-soft) |
-| `listDir(path?)` / `fileInfo(path)` / `readFile(path)` | ✅ roots→listing→base64 (8 MB cap); page renders the browser UI |
+| `wifiScan()` | ✅ nearby networks (Win classic WLAN on exe, WinRT on MSIX) |
+| `bluetoothDevices(inquiry)` | ✅ classic devices, no identity needed (both Win builds) |
+| `bleScan(seconds)` | ✅ LE name/RSSI scan-only (Android runtime perm; Win MSIX-only watcher) |
+| `getNotifications()` | ✅ read access (Android listener opt-in; Win UNL grant, MSIX-only) |
+| `notificationAccess()` / `openNotificationSettings()` | ✅ enabled-check + OS settings deep-link |
+| `openWifiSettings()` / `openBluetoothSettings()` | ✅ OS settings deep-link (the app cannot flip radios itself) |
+| `pickFolder()` / `fileRoot()` | ✅ user-picked HomeDeck folder (one folder, native picker) |
+| `listDir(path?)` / `fileInfo(path)` / `readFile(path)` | ✅ scoped to picked folder + per-site native allow/deny popup (8 MB cap) |
+| `writeFile(path, base64)` / `mkdir(path)` / `deleteFile(path)` | ✅ same scope + popup; delete is files + empty dirs only |
+
+Location was dropped (2026-11-24): no GPS on any build.
 
 `homedeck:ready` fires on `window` after injection.
 
@@ -86,7 +91,7 @@ deliberately not in CI yet — add it when the app goes public.
 
 ## v1 explicitly out
 
-Snapshot-boot images, offline banner, file pickers beyond WebView defaults,
+Snapshot-boot images, offline banner,
 tray/autostart, SecureStorage tokens, camera/mic bridge methods,
 avatar photo upload, icon/splash art (placeholder PNGs generated in-repo;
 replace `Platforms/Windows/Assets/` + add `MauiIcon`/`MauiSplashScreen` items).
