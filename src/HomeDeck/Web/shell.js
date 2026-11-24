@@ -70,6 +70,8 @@
     listDir: (path) => callAsync("listDir", path || ""),
     fileInfo: (path) => callAsync("fileInfo", path || ""),
     readFile: (path) => callAsync("readFile", path || ""),
+    wifiScan: () => callAsync("wifiScan"),
+    bluetoothDevices: (inquiry) => callAsync("bluetoothDevices", inquiry ? 1 : 0),
     shareText: (text, title) => callAsync("shareText", text || "", title || ""),
     clipboardWrite: (text) => callAsync("clipboardWrite", text || ""),
     clipboardRead: () => callAsync("clipboardRead"),

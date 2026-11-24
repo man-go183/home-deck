@@ -238,6 +238,14 @@ public class HomeDeckHostObject
             catch (Exception e) { _post(JsonPair(id, "{\"ok\":false,\"error\":" + Q(e.Message) + "}")); }
         });
 
+    /// <summary>Classic Win32 radio details (no identity needed — works
+    /// unpackaged too). WiFi current + nearby, BT radios + devices.</summary>
+    public void wifiScan(string id)
+        => Task.Run(() => _post(JsonPair(id, LegacyRadioInfo.WifiScan())));
+
+    public void bluetoothDevices(string id, int inquiry)
+        => Task.Run(() => _post(JsonPair(id, LegacyRadioInfo.BluetoothDevices(inquiry != 0))));
+
     public void readFile(string id, string? path)
         => Task.Run(() =>
         {
