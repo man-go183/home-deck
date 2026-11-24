@@ -54,7 +54,9 @@
     });
   }
 
-  function pgHost() { try { return window.location.hostname || ""; } catch (e) { return ""; } }
+  // file:// homepages have no hostname: they act as "local" so the
+  // one-time site grant can persist instead of asking on every call.
+  function pgHost() { try { if (window.location.protocol === "file:") return "local"; return window.location.hostname || ""; } catch (e) { return ""; } }
 
   window.HomeDeck = {
     version: "hd/1",

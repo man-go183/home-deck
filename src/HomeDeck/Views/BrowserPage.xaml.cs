@@ -108,7 +108,7 @@ public partial class BrowserPage : ContentPage
             var url = _pendingUrl;
             _pendingUrl = null;
             var p = _profile;
-            if (p != null && p.Url == url)
+            if (p != null && TargetUrl(p) == url)
                 StartNavigation(p);
         }
     }
@@ -141,7 +141,7 @@ public partial class BrowserPage : ContentPage
         SyncShield(p);
 
         Web.AdBlockEnabled = p.AdBlock;
-        try { Web.PageHost = new Uri(p.Url).Host; } catch { Web.PageHost = ""; }
+        try { Web.PageHost = new Uri(TargetUrl(p)).Host; } catch { Web.PageHost = ""; }
         if (_appeared)
             StartNavigation(p);
         else
@@ -149,7 +149,7 @@ public partial class BrowserPage : ContentPage
             // Page isn't on screen yet: starting the load now races WebView
             // setup and the first navigation gets dropped (the stuck splash).
             // Park the URL; OnAppearing starts the load once we're live.
-            _pendingUrl = p.Url;
+            _pendingUrl = TargetUrl(p);
             Splash.IsVisible = true;
         }
 
@@ -218,6 +218,23 @@ public partial class BrowserPage : ContentPage
         PillSlash.IsVisible = !p.AdBlock;
     }
 
+    /// <summary>What this profile actually loads: its imported file slot
+    /// (file://, fresh every navigation) or the URL. Falls back to the URL
+    /// when File mode has no file yet — the caller shows the missing state.</summary>
+    static string TargetUrl(Profile p)
+    {
+        try
+        {
+            if (p.UseLocal)
+            {
+                var f = HdFileGuard.HomepagePath(p.Id);
+                if (File.Exists(f)) return new Uri(f).AbsoluteUri;
+            }
+        }
+        catch { }
+        return p.Url;
+    }
+
     /// <summary>Begin (or re-begin) loading a profile URL. Only ever called
     /// while the page is on screen, so the WebView is ready to navigate.</summary>
     void StartNavigation(Profile p)
@@ -225,7 +242,16 @@ public partial class BrowserPage : ContentPage
         // Disarm first: kills the overlay everywhere, removes the auto-arm
         // snippet (new documents must not self-arm), then resets + navigates.
         CancelPickMode();
-        Web.Source = new UrlWebViewSource { Url = p.Url };
+        var target = TargetUrl(p);
+        if (p.UseLocal && target == p.Url)
+        {
+            // Slot empty: friendly error instead of a dead load. No
+            // watchdog/kick — there is nothing in flight to watch.
+            Splash.IsVisible = true;
+            ShowSplashError("This profile's homepage file is missing — flip its card to Edit and Import one.");
+            return;
+        }
+        Web.Source = new UrlWebViewSource { Url = target };
         Web.ResetBlockedCount();
         Web.ResetHiddenCount();
         _sessionPicks.Clear();
@@ -261,7 +287,7 @@ public partial class BrowserPage : ContentPage
                             SplashStatus.Text = "Retrying…";
                             SplashStatus.IsVisible = true;
                             Web.Source = null;
-                            Web.Source = new UrlWebViewSource { Url = p.Url };
+                            Web.Source = new UrlWebViewSource { Url = TargetUrl(p) };
                         }
                     }
                     catch { }
@@ -459,7 +485,7 @@ public partial class BrowserPage : ContentPage
                 Drop.IsVisible = false;
                 if (_profile != null)
                 {
-                    try { await Launcher.OpenAsync(_profile.Url); } catch { }
+                    try { await Launcher.OpenAsync(TargetUrl(_profile)); } catch { }
                 }
             }));
         }

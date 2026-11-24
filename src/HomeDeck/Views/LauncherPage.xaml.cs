@@ -5,6 +5,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Maui.Controls.Shapes;
 using Microsoft.Maui.Graphics;
 using Microsoft.Maui.Media;
+using Microsoft.Maui.Devices;
 using Microsoft.Maui.Storage;
 
 namespace HomeDeck.Views;
@@ -16,6 +17,12 @@ public partial class LauncherPage : ContentPage
     readonly AdBlockService _ads;
     bool _adding;
     Profile? _avaEditing;
+
+    static readonly FilePickerFileType HtmlType = new(new Dictionary<DevicePlatform, IEnumerable<string>>
+    {
+        { DevicePlatform.WinUI, new[] { ".html", ".htm" } },
+        { DevicePlatform.Android, new[] { "text/html" } },
+    });
     DateTime _lastInnerTap;
 
     public LauncherPage(ProfileStore store, IServiceProvider services, AdBlockService ads)
@@ -196,6 +203,75 @@ public partial class LauncherPage : ContentPage
             try { warn.IsVisible = !AvatarView.IsPerchanceUrl(linkEntry.Text ?? ""); }
             catch { }
         };
+        // Homepage source: Link (URL field) or File (imported .html slot).
+        // Toggle only switches; the slot is kept, Import overwrites it.
+        bool useLocal = p.UseLocal;
+        var srcGold = (Color)Application.Current.Resources["HdGold"];
+        var srcDim = (Color)Application.Current.Resources["HdDim"];
+        var srcBg = (Color)Application.Current.Resources["HdBg"];
+        var linkBtn = new Button { Text = "Link", FontSize = 12, CornerRadius = 8, Padding = new Thickness(14, 6) };
+        var fileBtn = new Button { Text = "File", FontSize = 12, CornerRadius = 8, Padding = new Thickness(14, 6) };
+        var fileStatus = new Label { FontSize = 12, TextColor = Colors.White, VerticalOptions = LayoutOptions.Center, HorizontalOptions = LayoutOptions.StartAndExpand };
+        var importBtn = new Button { Text = "Import", FontSize = 12, CornerRadius = 8, Padding = new Thickness(14, 6), BackgroundColor = Colors.Transparent, TextColor = srcDim, BorderColor = srcDim, BorderWidth = 1 };
+        var fileRow = new HorizontalStackLayout { Spacing = 8, IsVisible = false };
+        fileRow.Children.Add(fileStatus);
+        fileRow.Children.Add(importBtn);
+        void SyncFileStatus()
+        {
+            try
+            {
+                var slot = HdFileGuard.HomepagePath(p.Id);
+                fileStatus.Text = File.Exists(slot) ? Path.GetFileName(slot) : "no file yet";
+            }
+            catch { fileStatus.Text = "no file yet"; }
+        }
+        void SyncMode()
+        {
+            bool isFile = useLocal;
+            linkBtn.BackgroundColor = isFile ? Colors.Transparent : srcGold;
+            linkBtn.TextColor = isFile ? srcDim : srcBg;
+            linkBtn.BorderWidth = isFile ? 1 : 0;
+            linkBtn.BorderColor = srcDim;
+            fileBtn.BackgroundColor = isFile ? srcGold : Colors.Transparent;
+            fileBtn.TextColor = isFile ? srcBg : srcDim;
+            fileBtn.BorderWidth = isFile ? 0 : 1;
+            fileBtn.BorderColor = srcDim;
+            linkEntry.IsVisible = !isFile;
+            warn.IsVisible = !isFile && !AvatarView.IsPerchanceUrl(linkEntry.Text ?? "");
+            fileRow.IsVisible = isFile;
+        }
+        linkBtn.Clicked += (_, _) => { useLocal = false; SyncMode(); };
+        fileBtn.Clicked += (_, _) => { useLocal = true; SyncMode(); };
+        importBtn.Clicked += async (_, _) =>
+        {
+            try
+            {
+                var pick = await FilePicker.PickAsync(new PickOptions
+                {
+                    PickerTitle = "Import homepage",
+                    FileTypes = HtmlType
+                });
+                var src = pick?.FullPath;
+                if (string.IsNullOrEmpty(src) || !File.Exists(src)) return;
+                if (new FileInfo(src).Length > 8L * 1024 * 1024)
+                { await DisplayAlertAsync("Too big", "Homepage files are capped at 8 MB.", "OK"); return; }
+                var slot = HdFileGuard.HomepagePath(p.Id);
+                if (File.Exists(slot) && !await DisplayAlertAsync("Replace?", "This profile already has a homepage file. Import the new one over it?", "Replace", "Keep")) return;
+                Directory.CreateDirectory(Path.GetDirectoryName(slot) ?? "");
+                File.Copy(src, slot, true);
+                useLocal = true;
+                p.UseLocal = true;
+                _store.SaveProfiles();
+                SyncFileStatus();
+                SyncMode();
+            }
+            catch { }
+        };
+        SyncFileStatus();
+        SyncMode();
+        var modeRow = new HorizontalStackLayout { Spacing = 7, HorizontalOptions = LayoutOptions.Center };
+        modeRow.Children.Add(linkBtn);
+        modeRow.Children.Add(fileBtn);
         var save = new Button
         {
             Text = "Save", BackgroundColor = (Color)Application.Current.Resources["HdGold"],
@@ -207,11 +283,15 @@ public partial class LauncherPage : ContentPage
         {
             var name = (nameEntry.Text ?? "").Trim();
             p.Name = name.Length > 0 ? name : "Untitled";
-            var url = (linkEntry.Text ?? "").Trim();
-            if (url.Length > 0 && !url.StartsWith("http", StringComparison.OrdinalIgnoreCase))
-                url = "https://" + url;
-            if (url.Length > 0) p.Url = url;
+            if (!useLocal)
+            {
+                var url = (linkEntry.Text ?? "").Trim();
+                if (url.Length > 0 && !url.StartsWith("http", StringComparison.OrdinalIgnoreCase))
+                    url = "https://" + url;
+                if (url.Length > 0) p.Url = url;
+            }
             p.AdBlock = adChk.IsChecked;
+            p.UseLocal = useLocal;
             _store.SaveProfiles();
             BuildCards();
         };
@@ -226,13 +306,21 @@ public partial class LauncherPage : ContentPage
         {
             if (await DisplayAlertAsync("Delete?", $"Remove profile \"{p.Name}\"?", "Delete", "Cancel"))
             {
+                try
+                {
+                    var slot = HdFileGuard.HomepagePath(p.Id);
+                    if (File.Exists(slot)) File.Delete(slot);
+                }
+                catch { }
                 _store.Remove(p);
                 BuildCards();
             }
         };
         edit.Children.Add(nameEntry);
+        edit.Children.Add(modeRow);
         edit.Children.Add(linkEntry);
         edit.Children.Add(warn);
+        edit.Children.Add(fileRow);
         var adRow = new HorizontalStackLayout { Spacing = 8 };
         var adLab = new Label
         {

@@ -130,4 +130,20 @@ public static class HdFileGuard
         }
         catch { return false; }
     }
+
+    /// <summary>App-owned homepage slot for a profile: one fixed file, so
+    /// renames can't break it and orphans are impossible (import
+    /// overwrites). Lives in the scoped root so pages can reach it through
+    /// the bridge too (self-editing homepage).</summary>
+    public static string HomepagePath(string? profileId)
+    {
+        try
+        {
+            var safe = new string(((profileId ?? "home").Where(char.IsLetterOrDigit)).ToArray());
+            if (safe.Length == 0) safe = "home";
+            return Path.Combine(Root, "homepages", safe + ".html");
+        }
+        catch { return Path.Combine(DefaultRoot(), "homepages", "home.html"); }
+    }
+
 }

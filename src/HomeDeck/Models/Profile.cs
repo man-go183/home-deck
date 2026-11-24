@@ -6,6 +6,10 @@ public sealed class Profile
     public string Id { get; set; } = Guid.NewGuid().ToString("N");
     public string Name { get; set; } = "Untitled";
     public string Url { get; set; } = "https://perchance.org/";
+
+    /// <summary>Homepage source: false = Url link (default), true = the
+    /// profile's imported file slot (see HdFileGuard.HomepagePath).</summary>
+    public bool UseLocal { get; set; } = false;
     public string ColorHex { get; set; } = "#B3402E";
 
     /// <summary>Per-profile ad &amp; tracker blocking (Brave-style lists).</summary>
