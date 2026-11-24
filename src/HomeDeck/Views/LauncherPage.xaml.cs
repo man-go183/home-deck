@@ -221,7 +221,7 @@ public partial class LauncherPage : ContentPage
             try
             {
                 var slot = HdFileGuard.HomepagePath(p.Id);
-                fileStatus.Text = File.Exists(slot) ? Path.GetFileName(slot) : "no file yet";
+                fileStatus.Text = System.IO.File.Exists(slot) ? System.IO.Path.GetFileName(slot) : "no file yet";
             }
             catch { fileStatus.Text = "no file yet"; }
         }
@@ -252,13 +252,13 @@ public partial class LauncherPage : ContentPage
                     FileTypes = HtmlType
                 });
                 var src = pick?.FullPath;
-                if (string.IsNullOrEmpty(src) || !File.Exists(src)) return;
-                if (new FileInfo(src).Length > 8L * 1024 * 1024)
+                if (string.IsNullOrEmpty(src) || !System.IO.File.Exists(src)) return;
+                if (new System.IO.FileInfo(src).Length > 8L * 1024 * 1024)
                 { await DisplayAlertAsync("Too big", "Homepage files are capped at 8 MB.", "OK"); return; }
                 var slot = HdFileGuard.HomepagePath(p.Id);
-                if (File.Exists(slot) && !await DisplayAlertAsync("Replace?", "This profile already has a homepage file. Import the new one over it?", "Replace", "Keep")) return;
-                Directory.CreateDirectory(Path.GetDirectoryName(slot) ?? "");
-                File.Copy(src, slot, true);
+                if (System.IO.File.Exists(slot) && !await DisplayAlertAsync("Replace?", "This profile already has a homepage file. Import the new one over it?", "Replace", "Keep")) return;
+                System.IO.Directory.CreateDirectory(System.IO.Path.GetDirectoryName(slot) ?? "");
+                System.IO.File.Copy(src, slot, true);
                 useLocal = true;
                 p.UseLocal = true;
                 _store.SaveProfiles();
@@ -309,7 +309,7 @@ public partial class LauncherPage : ContentPage
                 try
                 {
                     var slot = HdFileGuard.HomepagePath(p.Id);
-                    if (File.Exists(slot)) File.Delete(slot);
+                    if (System.IO.File.Exists(slot)) System.IO.File.Delete(slot);
                 }
                 catch { }
                 _store.Remove(p);
@@ -675,7 +675,7 @@ public partial class LauncherPage : ContentPage
             var photo = await MediaPicker.Default.PickPhotoAsync();
             if (photo == null) return;
             var dir = System.IO.Path.Combine(FileSystem.AppDataDirectory, "avatars");
-            Directory.CreateDirectory(dir);
+            System.IO.Directory.CreateDirectory(dir);
             var dest = System.IO.Path.Combine(dir, p.Id + ".jpg");
             using var src = await photo.OpenReadAsync();
             using var dst = File.Create(dest);
@@ -696,7 +696,7 @@ public partial class LauncherPage : ContentPage
         try
         {
             var path = System.IO.Path.Combine(FileSystem.AppDataDirectory, "avatars", p.AvatarValue);
-            if (File.Exists(path)) File.Delete(path);
+            if (System.IO.File.Exists(path)) System.IO.File.Delete(path);
         }
         catch { }
         p.AvatarKind = "default";

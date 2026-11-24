@@ -89,7 +89,7 @@ static class LegacyRadioInfo
                 int signal = -1, state = -1;
                 var gg0 = g;
                 if (WlanQueryInterface(h, ref gg0, WLAN_CURRENT_CONNECTION,
-                        IntPtr.Zero, out _, out IntPtr conn) == 0)
+                        IntPtr.Zero, out _, out IntPtr conn, IntPtr.Zero) == 0)
                 {
                     try
                     {
@@ -128,7 +128,7 @@ static class LegacyRadioInfo
                         if (string.IsNullOrEmpty(s) || !seen.Add(s)) continue;
                         int sig = Marshal.ReadInt32(it, 604);
                         bool sec = Marshal.ReadInt32(it, 608) != 0;
-                        bool connected = (Marshal.ReadUInt32(it, 620) & 0x01) != 0;
+                        bool connected = (((uint)Marshal.ReadInt32(it, 620)) & 0x01) != 0;
                         nets.Add(new { ssid = s, signal = sig, secured = sec, connected });
                     }
                 }

@@ -72,7 +72,6 @@
     setBrightness: (level) => callSync("setBrightness", +level),
     openWifiSettings: () => callAsync("openWifiSettings"),
     openBluetoothSettings: () => callAsync("openBluetoothSettings"),
-    pickFolder: () => callAsync("pickFolder"),
     fileRoot: () => callSync("fileRoot"),
     listDir: (path) => callAsync("listDir", pgHost(), path || ""),
     fileInfo: (path) => callAsync("fileInfo", pgHost(), path || ""),

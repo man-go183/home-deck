@@ -216,24 +216,6 @@ public class HomeDeckHostObject
         catch (Exception e) { return "{\"ok\":false,\"error\":" + Q(e.Message) + "}"; }
     }
 
-    /// <summary>Change the scoped root. The OS folder picker IS the consent:
-    /// the user chose it with their own hands, so no site popup here. Every
-    /// read/write still needs that site's own grant.</summary>
-    public void pickFolder(string id)
-        => Task.Run(async () =>
-        {
-            try
-            {
-                var result = await Microsoft.Maui.ApplicationModel.MainThread.InvokeOnMainThreadAsync(
-                    () => Microsoft.Maui.Storage.FolderPicker.Default.PickAsync());
-                string? path = result?.IsSuccessful == true ? result.Folder?.Path : null;
-                if (string.IsNullOrWhiteSpace(path) || !HdFileGuard.SetRoot(path))
-                { _post(JsonPair(id, "{\"ok\":false,\"error\":\"no-pick\"}")); return; }
-                _post(JsonPair(id, "{\"ok\":true,\"data\":{\"root\":" + Q(HdFileGuard.Root) + "}}"));
-            }
-            catch (Exception e) { _post(JsonPair(id, "{\"ok\":false,\"error\":" + Q(e.Message) + "}")); }
-        });
-
     public void listDir(string id, string? host, string? path)
         => Task.Run(async () =>
         {

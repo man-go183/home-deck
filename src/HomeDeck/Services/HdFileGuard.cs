@@ -109,11 +109,11 @@ public static class HdFileGuard
     {
         try
         {
-            var page = Application.Current?.MainPage;
+            var page = Application.Current?.Windows.FirstOrDefault()?.Page;
             if (page == null) return false;
             var who = string.IsNullOrEmpty(host) ? "This page" : host;
-            var choice = await MainThread.InvokeOnMainThreadAsync(() =>
-                page.DisplayActionSheet($"{who} wants to {op} in your HomeDeck folder.",
+            var choice = await MainThread.InvokeOnMainThreadAsync(async () =>
+                await page.DisplayActionSheetAsync($"{who} wants to {op} in your HomeDeck folder.",
                     "Deny", null, "Always allow", "Just once"));
             if (choice == "Always allow" && host.Length > 0)
             {

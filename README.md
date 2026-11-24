@@ -54,7 +54,7 @@ exists, capability lands later.
 | `getNotifications()` | ✅ read access (Android listener opt-in; Win UNL grant, MSIX-only) |
 | `notificationAccess()` / `openNotificationSettings()` | ✅ enabled-check + OS settings deep-link |
 | `openWifiSettings()` / `openBluetoothSettings()` | ✅ OS settings deep-link (the app cannot flip radios itself) |
-| `pickFolder()` / `fileRoot()` | ✅ user-picked HomeDeck folder (one folder, native picker) |
+| `fileRoot()` | ✅ current HomeDeck folder (fixed default under Documents, created on first run) |
 | `listDir(path?)` / `fileInfo(path)` / `readFile(path)` | ✅ scoped to picked folder + per-site native allow/deny popup (8 MB cap) |
 | `writeFile(path, base64)` / `mkdir(path)` / `deleteFile(path)` | ✅ same scope + popup; delete is files + empty dirs only |
 

@@ -311,22 +311,6 @@ class HomeDeckJsBridge : Java.Lang.Object
         catch (Exception e) { return "{\"ok\":false,\"error\":" + JsonRaw(e.Message) + "}"; }
     }
 
-    [Android.Webkit.JavascriptInterface, Java.Interop.Export("pickFolder")]
-    public void PickFolder(string id)
-        => Task.Run(async () =>
-        {
-            try
-            {
-                var result = await MainThread.InvokeOnMainThreadAsync(
-                    () => Microsoft.Maui.Storage.FolderPicker.Default.PickAsync());
-                string? path = result?.IsSuccessful == true ? result.Folder?.Path : null;
-                if (string.IsNullOrWhiteSpace(path) || !HdFileGuard.SetRoot(path))
-                { Resolve(id, "{\"ok\":false,\"error\":\"no-pick\"}"); return; }
-                Resolve(id, "{\"ok\":true,\"data\":{\"root\":" + JsonRaw(HdFileGuard.Root) + "}}");
-            }
-            catch (Exception e) { Resolve(id, "{\"ok\":false,\"error\":" + JsonQuote(e.Message) + "}"); }
-        });
-
     [Android.Webkit.JavascriptInterface, Java.Interop.Export("listDir")]
     public void ListDir(string id, string? host, string? path)
         => Task.Run(async () =>
