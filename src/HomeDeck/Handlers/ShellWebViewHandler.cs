@@ -81,6 +81,13 @@ public partial class ShellWebViewHandler : WebViewHandler
         try { BridgeInitError ??= "bridge init: " + step + " (" + e.GetType().Name + ": " + Trunc(e.Message) + ")"; } catch { }
     }
 
+    /// <summary>Clear the recorded failure when its step later succeeds
+    /// (e.g. the host object registers on a later navigation). Never throws.</summary>
+    protected void ClearInitError(string step)
+    {
+        try { if (BridgeInitError != null && BridgeInitError.Contains("bridge init: " + step)) BridgeInitError = null; } catch { }
+    }
+
     static bool IsChanErr(string s) => s.StartsWith("THROW") || s == "TIMEOUT";
 
     static string Trunc(string? s, int n = 160)

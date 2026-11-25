@@ -12,13 +12,21 @@
 
   var nextId = 1;
   var pending = {};
-  var native = window.HomeDeckNative || window.chrome?.webview?.hostObjects?.HomeDeckNative;
+  // Resolved lazily per call: on Windows the host object can arrive after
+  // this script runs (registration retries on navigation), so a captured
+  // reference would stay undefined forever on already-loaded pages.
+  var native = null;
+  function getNative() {
+    if (!native) { try { native = window.HomeDeckNative || window.chrome?.webview?.hostObjects?.HomeDeckNative || null; } catch (e) { native = null; } }
+    return native;
+  }
 
   function callSync(name, ...args) {
     try {
-      if (!native) return Promise.resolve({ ok: false, error: "no-bridge" });
-      if (native[name]) {
-        var r = native[name](...args);
+      var n = getNative();
+      if (!n) return Promise.resolve({ ok: false, error: "no-bridge" });
+      if (n[name]) {
+        var r = n[name](...args);
         if (typeof r === "string") return Promise.resolve(JSON.parse(r));
         if (r && typeof r.then === "function") return r.then(x => typeof x === "string" ? JSON.parse(x) : x);
       }
@@ -44,11 +52,12 @@
   };
 
   function callAsync(name, ...args) {
-    if (!native || !native[name]) return Promise.resolve({ ok: false, error: "no-bridge" });
+    var n = getNative();
+    if (!n || !n[name]) return Promise.resolve({ ok: false, error: "no-bridge" });
     var id = nextId++;
     return new Promise(resolve => {
       pending[id] = resolve;
-      try { native[name](id, ...args); }
+      try { n[name](id, ...args); }
       catch (e) { delete pending[id]; resolve({ ok: false, error: String(e) }); }
       setTimeout(() => { if (pending[id]) { delete pending[id]; resolve({ ok: false, error: "timeout" }); } }, 30000);
     });

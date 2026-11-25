@@ -17,6 +17,8 @@ public partial class ShellWebViewHandler
     Microsoft.UI.Xaml.Controls.WebView2? _wv;
     Microsoft.Web.WebView2.Core.CoreWebView2? _core;
     string? _autoArmId;
+    bool _hostRegistered;
+    Action? _navHostRetry;
 
     /// <summary>True when consumed: pick mode was armed and is now
     /// cancelled. Wired by the page (it owns the armed flag).</summary>
@@ -42,6 +44,8 @@ public partial class ShellWebViewHandler
     {
         try { DisarmFrames(); } catch { }
         _core = null;
+        _hostRegistered = false;
+        _navHostRetry = null;
         if (_wv == platformView) _wv = null;
         base.DisconnectHandler(platformView);
     }
@@ -148,11 +152,26 @@ public partial class ShellWebViewHandler
 
         try
         {
-            core.AddHostObjectToScript("HomeDeckNative",
-                new HomeDeckHostObject(msg =>
-                    MainThread.BeginInvokeOnMainThread(
-                        () => { _ = wv.ExecuteScriptAsync($"window.__hdResolveMsg({msg})"); }), _ads,
-                    () => { try { PickCancelRequested?.Invoke(); } catch { } }));
+            // The host object can throw ERROR_INVALID_STATE while the
+            // browser side isn't ready yet, so registration retries on
+            // every navigation until it sticks. Pages already loaded pick
+            // it up with no reload via shell.js's lazy native resolution.
+            bool TryRegisterHost()
+            {
+                try
+                {
+                    core.AddHostObjectToScript("HomeDeckNative",
+                        new HomeDeckHostObject(msg =>
+                            MainThread.BeginInvokeOnMainThread(
+                                () => { _ = wv.ExecuteScriptAsync($"window.__hdResolveMsg({msg})"); }), _ads,
+                            () => { try { PickCancelRequested?.Invoke(); } catch { } }));
+                    try { _hostRegistered = true; ClearInitError("host-object"); } catch { }
+                    return true;
+                }
+                catch (Exception e) { NoteInitError("host-object", e); return false; }
+            }
+            TryRegisterHost();
+            _navHostRetry = () => { try { if (!_hostRegistered) TryRegisterHost(); } catch { } };
         }
         catch (Exception e) { NoteInitError("host-object", e); }
 
@@ -243,6 +262,7 @@ public partial class ShellWebViewHandler
         {
             core.NavigationCompleted += async (_, _) =>
             {
+                try { _navHostRetry?.Invoke(); } catch { }
                 try { await wv.ExecuteScriptAsync(js); } catch { }
                 try { await InjectCosmeticsAsync(wv, view); } catch { }
             };
