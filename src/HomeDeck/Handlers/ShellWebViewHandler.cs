@@ -1,6 +1,7 @@
 using HomeDeck.Controls;
 using Microsoft.Maui.Handlers;
 using Microsoft.Maui.Storage;
+using System.Linq;
 
 namespace HomeDeck.Handlers;
 
@@ -70,22 +71,43 @@ public partial class ShellWebViewHandler : WebViewHandler
         try { _ = EvalJsAsync("window.HomeDeckPick&&window.HomeDeckPick.cancel()"); } catch { }
     }
 
-    /// <summary>First bridge-init failure (step + exception), else null.
-    /// Windows records it; the shield panel surfaces it so a dead bridge is
-    /// diagnosable on device instead of a silent "waiting for bridge…".</summary>
-    public string? BridgeInitError { get; protected set; }
-
-    /// <summary>Record the first init failure only; never throws.</summary>
-    protected void NoteInitError(string step, Exception e)
+    /// <summary>Per-step latest bridge-init failures, else null. The shield
+    /// panel surfaces these so a dead bridge is diagnosable on device
+    /// instead of a silent "waiting for bridge…".</summary>
+    public string? BridgeInitError
     {
-        try { BridgeInitError ??= "bridge init: " + step + " (" + e.GetType().Name + ": " + Trunc(e.Message) + ")"; } catch { }
+        get
+        {
+            try
+            {
+                lock (_initLock)
+                {
+                    if (_initErrors.Count == 0) return null;
+                    return string.Join("\n", _initErrors.OrderBy(kv => kv.Key)
+                        .Select(kv => "bridge init: " + kv.Key + " (" + kv.Value + ")"));
+                }
+            }
+            catch { return null; }
+        }
+    }
+    readonly Dictionary<string, string> _initErrors = new();
+    readonly object _initLock = new();
+
+    /// <summary>Record (or refresh) a step's failure; never throws.</summary>
+    protected void NoteInitError(string step, Exception e)
+        => NoteInitError(step, e.GetType().Name + ": " + Trunc(e.Message));
+
+    /// <summary>Record (or refresh) a step's failure; never throws.</summary>
+    protected void NoteInitError(string step, string detail)
+    {
+        try { lock (_initLock) { _initErrors[step] = detail; } } catch { }
     }
 
     /// <summary>Clear the recorded failure when its step later succeeds
     /// (e.g. the host object registers on a later navigation). Never throws.</summary>
     protected void ClearInitError(string step)
     {
-        try { if (BridgeInitError != null && BridgeInitError.Contains("bridge init: " + step)) BridgeInitError = null; } catch { }
+        try { lock (_initLock) { _initErrors.Remove(step); } } catch { }
     }
 
     static bool IsChanErr(string s) => s.StartsWith("THROW") || s == "TIMEOUT";

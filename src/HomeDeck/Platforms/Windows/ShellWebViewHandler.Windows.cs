@@ -19,6 +19,8 @@ public partial class ShellWebViewHandler
     string? _autoArmId;
     bool _hostRegistered;
     Action? _navHostRetry;
+    bool _retryPending;
+    int _hostAttempts;
 
     /// <summary>True when consumed: pick mode was armed and is now
     /// cancelled. Wired by the page (it owns the armed flag).</summary>
@@ -147,33 +149,15 @@ public partial class ShellWebViewHandler
     async Task RegisterCoreAsync(Microsoft.UI.Xaml.Controls.WebView2 wv, ShellWebView view, string? js)
     {
         var core = wv.CoreWebView2;
-        if (core == null) { try { BridgeInitError ??= "bridge init: engine (no CoreWebView2)"; } catch { } return; }
+        if (core == null) { NoteInitError("engine", "no CoreWebView2"); return; }
         _core = core;
 
-        try
-        {
-            // The host object can throw ERROR_INVALID_STATE while the
-            // browser side isn't ready yet, so registration retries on
-            // every navigation until it sticks. Pages already loaded pick
-            // it up with no reload via shell.js's lazy native resolution.
-            bool TryRegisterHost()
-            {
-                try
-                {
-                    core.AddHostObjectToScript("HomeDeckNative",
-                        new HomeDeckHostObject(msg =>
-                            MainThread.BeginInvokeOnMainThread(
-                                () => { _ = wv.ExecuteScriptAsync($"window.__hdResolveMsg({msg})"); }), _ads,
-                            () => { try { PickCancelRequested?.Invoke(); } catch { } }));
-                    try { _hostRegistered = true; ClearInitError("host-object"); } catch { }
-                    return true;
-                }
-                catch (Exception e) { NoteInitError("host-object", e); return false; }
-            }
-            TryRegisterHost();
-            _navHostRetry = () => { try { if (!_hostRegistered) TryRegisterHost(); } catch { } };
-        }
-        catch (Exception e) { NoteInitError("host-object", e); }
+        // The host object can throw ERROR_INVALID_STATE while the browser
+        // side isn't ready yet, so registration retries on every navigation
+        // (plus one delayed retry) until it sticks. Pages already loaded
+        // pick it up with no reload via shell.js's lazy native resolution.
+        try { TryRegisterHost(); } catch (Exception e) { NoteInitError("host-object", e); }
+        _navHostRetry = () => { try { if (!_hostRegistered) TryRegisterHost(); } catch { } };
 
         try { core.AddWebResourceRequestedFilter("*", Microsoft.Web.WebView2.Core.CoreWebView2WebResourceContext.All); }
         catch (Exception e) { NoteInitError("filter", e); }
@@ -263,11 +247,52 @@ public partial class ShellWebViewHandler
             core.NavigationCompleted += async (_, _) =>
             {
                 try { _navHostRetry?.Invoke(); } catch { }
+                try { if (!_hostRegistered) _ = DelayedHostRetryAsync(); } catch { }
                 try { await wv.ExecuteScriptAsync(js); } catch { }
                 try { await InjectCosmeticsAsync(wv, view); } catch { }
             };
         }
         catch (Exception e) { NoteInitError("nav-hook", e); }
+    }
+
+    /// <summary>Register the sync host object on the live core. Every
+    /// attempt is counted and the latest error kept per step, so the shield
+    /// panel shows exactly what is failing and how often it retried.</summary>
+    bool TryRegisterHost()
+    {
+        var wv = _wv;
+        var core = _core;
+        if (wv == null || core == null) { NoteInitError("host-object", "no view/core"); return false; }
+        _hostAttempts++;
+        var attempt = _hostAttempts;
+        try
+        {
+            core.AddHostObjectToScript("HomeDeckNative",
+                new HomeDeckHostObject(msg =>
+                    MainThread.BeginInvokeOnMainThread(
+                        () => { _ = wv.ExecuteScriptAsync($"window.__hdResolveMsg({msg})"); }), _ads,
+                    () => { try { PickCancelRequested?.Invoke(); } catch { } }));
+            try { _hostRegistered = true; ClearInitError("host-object"); } catch { }
+            return true;
+        }
+        catch (Exception e) { NoteInitError("host-object", "try " + attempt + ": " + e.GetType().Name + ": " + Trunc(e.Message)); return false; }
+    }
+
+    /// <summary>One delayed re-attempt per navigation: the browser side is
+    /// sometimes ready a couple of seconds after NavigationCompleted.</summary>
+    async Task DelayedHostRetryAsync()
+    {
+        if (_retryPending || _hostRegistered) return;
+        _retryPending = true;
+        try
+        {
+            await Task.Delay(2500);
+            if (_hostRegistered) return;
+            try { await MainThread.InvokeOnMainThreadAsync(() => TryRegisterHost()); }
+            catch (Exception e) { NoteInitError("host-object", e); }
+        }
+        catch { }
+        finally { try { _retryPending = false; } catch { } }
     }
 
     async Task InjectCosmeticsAsync(
