@@ -258,9 +258,11 @@ window.__hdCountMatches = function (list) {
     // Global exit first: the shell cancels pick mode everywhere (this
     // frame's Esc otherwise never reaches other frames or the shell).
     try {
-      var n = window.HomeDeckNative ||
-        (window.chrome && window.chrome.webview && window.chrome.webview.hostObjects && window.chrome.webview.hostObjects.HomeDeckNative);
-      if (n && n.reportCancel) { try { n.reportCancel(); } catch (e0) {} }
+      // Same rule as report(): real object with a verified method only.
+      // (reportCancel exists natively, so the old async-proxy call happened
+      // to work — but it also duplicated the hd-cancel message below.)
+      var n = window.HomeDeckNative;
+      if (n && typeof n.reportCancel === "function") { try { n.reportCancel.call(n); } catch (e0) {} }
     } catch (e1) {}
     try {
       if (window.chrome && window.chrome.webview && window.chrome.webview.postMessage)
