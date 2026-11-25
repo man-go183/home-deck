@@ -157,7 +157,7 @@ public partial class LauncherPage : ContentPage
         });
         front.Children.Add(new Label
         {
-            Text = p.PageId, FontSize = 10,
+            Text = CardSubtitle(p), FontSize = 10,
             TextColor = (Color)Application.Current!.Resources["HdDim"],
             HorizontalOptions = LayoutOptions.Center,
             LineBreakMode = LineBreakMode.TailTruncation
@@ -358,9 +358,11 @@ public partial class LauncherPage : ContentPage
             // Nested-tap guard: MAUI fires BOTH the pen/shield tap and this
             // card tap. Inner handlers stamp the time; a card tap landing
             // within 500ms of one is the same finger — swallow it.
+            // Edit-face guard: while flipped, taps must never navigate.
             Command = new Command(async () =>
             {
                 if ((DateTime.UtcNow - _lastInnerTap).TotalMilliseconds < 500) return;
+                if (editScroll.IsVisible) return;
                 await OpenProfile(p);
             })
         });
@@ -371,8 +373,7 @@ public partial class LauncherPage : ContentPage
         return outer;
     }
 
-    static async void Flip(Grid face, bool toEdit, Profile _)
-    {
+    static async void Flip(Grid face, bool toEdit, Profile _)    {
         try
         {
             await face.ScaleXTo(0.02, 110, Easing.CubicIn);
@@ -386,6 +387,19 @@ public partial class LauncherPage : ContentPage
             ((View)face.Children[1]).IsVisible = toEdit;
             face.ScaleX = 1;
         }
+    }
+
+    /// <summary>Front-face subtitle: the slot file name for File-mode
+    /// profiles ("no file yet" when the slot is empty), else the URL's page id.</summary>
+    static string CardSubtitle(Profile p)
+    {
+        if (!p.UseLocal) return p.PageId;
+        try
+        {
+            var slot = HdFileGuard.HomepagePath(p.Id);
+            return System.IO.File.Exists(slot) ? System.IO.Path.GetFileName(slot) : "no file yet";
+        }
+        catch { return "no file yet"; }
     }
 
     static View MakePenButton(Action onTap)
