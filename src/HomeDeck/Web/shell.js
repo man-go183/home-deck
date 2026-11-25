@@ -208,12 +208,14 @@ window.__hdCountMatches = function (list) {
   function report(host, sel, action) {
     var payload = { type: "hd-pick", host: host, selector: sel, action: action };
     try {
-      var n = window.HomeDeckNative ||
-        (window.chrome && window.chrome.webview && window.chrome.webview.hostObjects && window.chrome.webview.hostObjects.HomeDeckNative);
-      if (n) {
-        if (action === "remove" && n.reportRemoved) { n.reportRemoved(host, sel); return true; }
-        if (action !== "remove" && n.reportPicked) { n.reportPicked(host, sel); return true; }
-      }
+      // Real object only (Android interface, or the Windows sync proxy):
+      // the async promise-proxy fabricates truthy lookups for methods that
+      // don't exist natively (reportPicked/reportRemoved are Android-only),
+      // and such a call vanishes with an unhandled rejection while this
+      // function wrongly reports success — so the message below never sends.
+      var n = window.HomeDeckNative;
+      var m = action === "remove" ? (n && n.reportRemoved) : (n && n.reportPicked);
+      if (typeof m === "function") { m.call(n, host, sel); return true; }
     } catch (e) {}
     try {
       // String form: this SDK's postMessage is string-only (an object arg
