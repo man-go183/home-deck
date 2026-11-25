@@ -33,10 +33,24 @@
     return native;
   }
 
+  // No native proxy: queue for the shell's poll drain instead of failing.
+  // The entry resolves via __hdResolveMsg like a normal async call.
+  function enqueueCall(name, args) {
+    var id = nextId++;
+    return new Promise(function (resolve) {
+      pending[id] = resolve;
+      try {
+        window.__hdOutbox = window.__hdOutbox || [];
+        window.__hdOutbox.push({ id: id, method: name, args: args || [] });
+      } catch (e) { delete pending[id]; resolve({ ok: false, error: String(e && e.message || e) }); return; }
+      setTimeout(function () { if (pending[id]) { delete pending[id]; resolve({ ok: false, error: "timeout" }); } }, 30000);
+    });
+  }
+
   function callSync(name, ...args) {
     try {
       var n = getNative();
-      if (!n) return Promise.resolve({ ok: false, error: "no-bridge" });
+      if (!n) return enqueueCall(name, args);
       if (!n.p[name]) return Promise.resolve({ ok: false, error: "no-method: " + name });
       if (n.sync) {
         var r = n.p[name](...args);
@@ -69,7 +83,7 @@
 
   function callAsync(name, ...args) {
     var n = getNative();
-    if (!n) return Promise.resolve({ ok: false, error: "no-bridge" });
+    if (!n) return enqueueCall(name, args);
     try { if (!n.p[name]) return Promise.resolve({ ok: false, error: "no-method: " + name }); }
     catch (e) { return Promise.resolve({ ok: false, error: String(e && e.message || e) }); }
     var id = nextId++;
@@ -123,6 +137,19 @@
 
   window.dispatchEvent(new Event("homedeck:ready"));
 })();
+
+/* Poll-transport outbox (no native proxy — e.g. Windows file://): calls
+ * land here when getNative() finds nothing; the shell drains the queue
+ * with script eval and posts answers to __hdResolveMsg. Re-injection
+ * safe: the queue is never wiped, the drainer just re-attached. */
+window.__hdOutbox = window.__hdOutbox || [];
+window.__hdTakeOutbox = function () {
+  try {
+    var q = window.__hdOutbox || [];
+    window.__hdOutbox = [];
+    return JSON.stringify(q);
+  } catch (e) { try { window.__hdOutbox = []; } catch (e2) {} return "[]"; }
+};
 
 /* Hidden-element count for the shell's counter (one pass per load). */
 window.__hdCountMatches = function (list) {

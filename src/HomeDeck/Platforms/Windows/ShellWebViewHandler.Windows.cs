@@ -1,4 +1,6 @@
+using System.Globalization;
 using System.Linq;
+using System.Reflection;
 using System.Runtime.InteropServices.WindowsRuntime;
 using System.Text.Json;
 using HomeDeck;
@@ -21,6 +23,8 @@ public partial class ShellWebViewHandler
     Action? _navHostRetry;
     bool _retryPending;
     int _hostAttempts;
+    HomeDeckHostObject? _bridge;
+    CancellationTokenSource? _pollCts;
 
     /// <summary>True when consumed: pick mode was armed and is now
     /// cancelled. Wired by the page (it owns the armed flag).</summary>
@@ -48,6 +52,9 @@ public partial class ShellWebViewHandler
         _core = null;
         _hostRegistered = false;
         _navHostRetry = null;
+        _bridge = null;
+        try { _pollCts?.Cancel(); } catch { }
+        _pollCts = null;
         if (_wv == platformView) _wv = null;
         base.DisconnectHandler(platformView);
     }
@@ -152,6 +159,14 @@ public partial class ShellWebViewHandler
         if (core == null) { NoteInitError("engine", "no CoreWebView2"); return; }
         _core = core;
 
+        // Dispatch target for the poll transport (and the host object if it
+        // ever registers): the same surface, unregistered. Postbacks ride
+        // the proven native->page eval, never the broken page->native side.
+        _bridge = new HomeDeckHostObject(msg =>
+            MainThread.BeginInvokeOnMainThread(
+                () => { _ = wv.ExecuteScriptAsync($"window.__hdResolveMsg({msg})"); }), _ads,
+            () => { try { PickCancelRequested?.Invoke(); } catch { } });
+
         // The host object can throw ERROR_INVALID_STATE while the browser
         // side isn't ready yet, so registration retries on every navigation
         // (plus one delayed retry) until it sticks. Pages already loaded
@@ -253,6 +268,11 @@ public partial class ShellWebViewHandler
             };
         }
         catch (Exception e) { NoteInitError("nav-hook", e); }
+
+        // Poll transport: the page queues bridge calls when no native proxy
+        // exists; the drain below runs them on _bridge and posts answers
+        // back via eval. Only the proven native->page direction is used.
+        StartPollLoop(wv);
     }
 
     /// <summary>Register the sync host object on the live core. Every
@@ -262,16 +282,13 @@ public partial class ShellWebViewHandler
     {
         var wv = _wv;
         var core = _core;
-        if (wv == null || core == null) { NoteInitError("host-object", "no view/core"); return false; }
+        var bridge = _bridge;
+        if (wv == null || core == null || bridge == null) { NoteInitError("host-object", "no view/core/bridge"); return false; }
         _hostAttempts++;
         var attempt = _hostAttempts;
         try
         {
-            core.AddHostObjectToScript("HomeDeckNative",
-                new HomeDeckHostObject(msg =>
-                    MainThread.BeginInvokeOnMainThread(
-                        () => { _ = wv.ExecuteScriptAsync($"window.__hdResolveMsg({msg})"); }), _ads,
-                    () => { try { PickCancelRequested?.Invoke(); } catch { } }));
+            core.AddHostObjectToScript("HomeDeckNative", bridge);
             try { _hostRegistered = true; ClearInitError("host-object"); } catch { }
             return true;
         }
@@ -293,6 +310,166 @@ public partial class ShellWebViewHandler
         }
         catch { }
         finally { try { _retryPending = false; } catch { } }
+    }
+
+    /// <summary>Poll loop for the outbox transport. One eval per 500ms per
+    /// page (trivial cost); eval runs on the UI thread because background
+    /// WebView2 calls fail silently. Never throws; the loop dies only with
+    /// the view (disconnect cancels it).</summary>
+    void StartPollLoop(Microsoft.UI.Xaml.Controls.WebView2 wv)
+    {
+        try { _pollCts?.Cancel(); } catch { }
+        var cts = new CancellationTokenSource();
+        _pollCts = cts;
+        _ = Task.Run(() => PollLoopAsync(wv, cts.Token));
+    }
+
+    async Task PollLoopAsync(Microsoft.UI.Xaml.Controls.WebView2 wv, CancellationToken ct)
+    {
+        while (!ct.IsCancellationRequested)
+        {
+            try { await Task.Delay(500, ct); } catch { return; }
+            if (ct.IsCancellationRequested) return;
+            var bridge = _bridge;
+            if (bridge == null) continue;
+            string? raw = null;
+            try { raw = await MainThread.InvokeOnMainThreadAsync(() => wv.ExecuteScriptAsync("window.__hdTakeOutbox&&window.__hdTakeOutbox()")); }
+            catch { continue; }
+            if (string.IsNullOrEmpty(raw)) continue;
+            List<OutboxCall>? calls = null;
+            try
+            {
+                using var doc = JsonDocument.Parse(raw);
+                var root = doc.RootElement;
+                if (root.ValueKind == JsonValueKind.String)
+                {
+                    try { using var inner = JsonDocument.Parse(root.GetString() ?? "[]"); calls = ParseOutboxCalls(inner.RootElement); }
+                    catch { continue; }
+                }
+                else calls = ParseOutboxCalls(root);
+            }
+            catch { continue; }
+            if (calls == null || calls.Count == 0) continue;
+            foreach (var call in calls)
+            {
+                if (ct.IsCancellationRequested) return;
+                try { DispatchOutboxCall(wv, bridge, call); } catch { }
+            }
+        }
+    }
+
+    sealed class OutboxCall
+    {
+        public int Id;
+        public string Method = "";
+        public readonly List<JsonElement> Args = new();
+    }
+
+    static List<OutboxCall> ParseOutboxCalls(JsonElement root)
+    {
+        var list = new List<OutboxCall>();
+        try
+        {
+            if (root.ValueKind != JsonValueKind.Array) return list;
+            foreach (var el in root.EnumerateArray())
+            {
+                try
+                {
+                    if (el.ValueKind != JsonValueKind.Object) continue;
+                    if (!el.TryGetProperty("id", out var idp) || !el.TryGetProperty("method", out var mp)) continue;
+                    var c = new OutboxCall { Id = idp.GetInt32(), Method = mp.GetString() ?? "" };
+                    if (el.TryGetProperty("args", out var ap) && ap.ValueKind == JsonValueKind.Array)
+                        foreach (var a in ap.EnumerateArray()) c.Args.Add(a.Clone());
+                    if (c.Method.Length > 0) list.Add(c);
+                }
+                catch { }
+            }
+        }
+        catch { }
+        return list;
+    }
+
+    /// <summary>Run one queued bridge call on the unregistered surface.
+    /// void + id-first methods answer via their own postback; sync string
+    /// methods and the no-arg reportCancel answer inline here.</summary>
+    void DispatchOutboxCall(Microsoft.UI.Xaml.Controls.WebView2 wv, HomeDeckHostObject bridge, OutboxCall call)
+    {
+        void Post(string json)
+        {
+            try
+            {
+                var msg = "{\"id\":" + call.Id + ",\"result\":" + json + "}";
+                MainThread.BeginInvokeOnMainThread(() => { try { _ = wv.ExecuteScriptAsync($"window.__hdResolveMsg({msg})"); } catch { } });
+            }
+            catch { }
+        }
+        MethodInfo? mi = null;
+        try { mi = typeof(HomeDeckHostObject).GetMethod(call.Method, BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase); }
+        catch { }
+        if (mi == null) { Post("{\"ok\":false,\"error\":" + JsonSerializer.Serialize("no-method: " + call.Method) + "}"); return; }
+        var ps = mi.GetParameters();
+        try
+        {
+            if (mi.ReturnType == typeof(void))
+            {
+                var margs = new object?[ps.Length];
+                int ai = 0;
+                if (ps.Length > 0 && ps[0].Name == "id" && ps[0].ParameterType == typeof(string))
+                { margs[0] = call.Id.ToString(); ai = 1; }
+                for (int i = ai; i < ps.Length; i++)
+                    margs[i] = CoerceArg(ps[i].ParameterType, i - ai < call.Args.Count ? call.Args[i - ai] : default);
+                mi.Invoke(bridge, margs); // async results arrive via the bridge's own postback
+                if (ps.Length == 0) Post("{\"ok\":true}");
+            }
+            else if (mi.ReturnType == typeof(string))
+            {
+                var margs = new object?[ps.Length];
+                for (int i = 0; i < ps.Length; i++)
+                    margs[i] = CoerceArg(ps[i].ParameterType, i < call.Args.Count ? call.Args[i] : default);
+                var r = (string?)mi.Invoke(bridge, margs);
+                Post(string.IsNullOrEmpty(r) ? "{\"ok\":false,\"error\":\"empty\"}" : r);
+            }
+            else Post("{\"ok\":false,\"error\":" + JsonSerializer.Serialize("bad-signature: " + call.Method) + "}");
+        }
+        catch (Exception e)
+        {
+            var inner = e is TargetInvocationException tie && tie.InnerException != null ? tie.InnerException : e;
+            Post("{\"ok\":false,\"error\":" + JsonSerializer.Serialize(Trunc(inner.Message)) + "}");
+        }
+    }
+
+    /// <summary>JSON value to a bridge parameter type (string/int/float/bool
+    /// cover the whole surface). Never throws; missing values become the
+    /// type default (null for string).</summary>
+    static object? CoerceArg(Type t, JsonElement el)
+    {
+        try
+        {
+            if (el.ValueKind == JsonValueKind.Undefined || el.ValueKind == JsonValueKind.Null)
+                return t == typeof(string) ? null : (t.IsValueType ? Activator.CreateInstance(t) : null);
+            if (t == typeof(string)) return el.ValueKind == JsonValueKind.String ? el.GetString() : el.ToString();
+            if (t == typeof(int))
+            {
+                if (el.ValueKind == JsonValueKind.Number && el.TryGetInt32(out var n)) return n;
+                if (el.ValueKind == JsonValueKind.String && int.TryParse(el.GetString(), out n)) return n;
+                return 0;
+            }
+            if (t == typeof(float))
+            {
+                if (el.ValueKind == JsonValueKind.Number && el.TryGetSingle(out var x)) return x;
+                if (el.ValueKind == JsonValueKind.String && float.TryParse(el.GetString(), NumberStyles.Float, CultureInfo.InvariantCulture, out x)) return x;
+                return 0f;
+            }
+            if (t == typeof(bool))
+            {
+                if (el.ValueKind == JsonValueKind.True) return true;
+                if (el.ValueKind == JsonValueKind.False) return false;
+                if (el.ValueKind == JsonValueKind.String && bool.TryParse(el.GetString(), out var b)) return b;
+                return false;
+            }
+        }
+        catch { }
+        try { return t.IsValueType ? Activator.CreateInstance(t) : null; } catch { return null; }
     }
 
     async Task InjectCosmeticsAsync(
