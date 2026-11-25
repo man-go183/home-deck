@@ -12,12 +12,24 @@
 
   var nextId = 1;
   var pending = {};
-  // Resolved lazily per call: on Windows the host object can arrive after
-  // this script runs (registration retries on navigation), so a captured
-  // reference would stay undefined forever on already-loaded pages.
-  var native = null;
+  // Native proxy resolution: prefer a SYNC proxy (window.HomeDeckNative,
+  // else chrome.webview.hostObjects.sync.*). The async promise-proxy
+  // (chrome.webview.hostObjects.*) cannot run this object's sync methods,
+  // so it is only a last resort, used with promise handling. Re-resolved
+  // per call until a sync proxy sticks: on Windows the host object can
+  // arrive after this script runs (registration retries on navigation).
+  var native = null; // {p, sync} or null
   function getNative() {
-    if (!native) { try { native = window.HomeDeckNative || window.chrome?.webview?.hostObjects?.HomeDeckNative || null; } catch (e) { native = null; } }
+    try {
+      if (window.HomeDeckNative) native = { p: window.HomeDeckNative, sync: true };
+      else if (window.chrome?.webview?.hostObjects?.sync?.HomeDeckNative)
+        native = { p: window.chrome.webview.hostObjects.sync.HomeDeckNative, sync: true };
+      else if (!native || !native.sync) {
+        if (window.chrome?.webview?.hostObjects?.HomeDeckNative)
+          native = { p: window.chrome.webview.hostObjects.HomeDeckNative, sync: false };
+        else native = null;
+      }
+    } catch (e) { native = null; }
     return native;
   }
 
@@ -25,12 +37,16 @@
     try {
       var n = getNative();
       if (!n) return Promise.resolve({ ok: false, error: "no-bridge" });
-      if (n[name]) {
-        var r = n[name](...args);
+      if (!n.p[name]) return Promise.resolve({ ok: false, error: "no-method: " + name });
+      if (n.sync) {
+        var r = n.p[name](...args);
         if (typeof r === "string") return Promise.resolve(JSON.parse(r));
         if (r && typeof r.then === "function") return r.then(x => typeof x === "string" ? JSON.parse(x) : x);
+        return Promise.resolve({ ok: false, error: "no-method: " + name });
       }
-      return Promise.resolve({ ok: false, error: "no-method: " + name });
+      return Promise.resolve(n.p[name](...args)).then(
+        x => { try { return typeof x === "string" ? JSON.parse(x) : x; } catch (e) { return { ok: false, error: String(e) }; } },
+        e => ({ ok: false, error: String(e && e.message || e) }));
     } catch (e) {
       return Promise.resolve({ ok: false, error: String(e && e.message || e) });
     }
@@ -53,11 +69,20 @@
 
   function callAsync(name, ...args) {
     var n = getNative();
-    if (!n || !n[name]) return Promise.resolve({ ok: false, error: "no-bridge" });
+    if (!n) return Promise.resolve({ ok: false, error: "no-bridge" });
+    try { if (!n.p[name]) return Promise.resolve({ ok: false, error: "no-method: " + name }); }
+    catch (e) { return Promise.resolve({ ok: false, error: String(e && e.message || e) }); }
     var id = nextId++;
     return new Promise(resolve => {
       pending[id] = resolve;
-      try { n[name](id, ...args); }
+      try {
+        var invoked = n.p[name](id, ...args);
+        // Async proxy: a rejected invocation means dispatch failed — fail
+        // fast instead of waiting out the 30s callback timeout. (The real
+        // result still arrives via __hdResolveMsg, as with sync proxies.)
+        if (!n.sync && invoked && typeof invoked.then === "function")
+          invoked.then(null, e => { if (pending[id]) { delete pending[id]; resolve({ ok: false, error: String(e && e.message || e) }); } });
+      }
       catch (e) { delete pending[id]; resolve({ ok: false, error: String(e) }); }
       setTimeout(() => { if (pending[id]) { delete pending[id]; resolve({ ok: false, error: "timeout" }); } }, 30000);
     });
