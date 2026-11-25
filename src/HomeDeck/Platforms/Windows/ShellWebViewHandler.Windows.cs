@@ -26,6 +26,12 @@ public partial class ShellWebViewHandler
     HomeDeckHostObject? _bridge;
     CancellationTokenSource? _pollCts;
 
+    /// <summary>Native-observed top page URL (set on the UI thread from
+    /// navigation events, read from any thread). Feeds the host object
+    /// so file:// grants bind to the actual calling page file — never
+    /// to a page-supplied string.</summary>
+    volatile string? _topUrl;
+
     /// <summary>True when consumed: pick mode was armed and is now
     /// cancelled. Wired by the page (it owns the armed flag).</summary>
     public Func<bool>? PickEscPressed;
@@ -53,6 +59,7 @@ public partial class ShellWebViewHandler
         _hostRegistered = false;
         _navHostRetry = null;
         _bridge = null;
+        _topUrl = null;
         try { _pollCts?.Cancel(); } catch { }
         _pollCts = null;
         if (_wv == platformView) _wv = null;
@@ -158,6 +165,7 @@ public partial class ShellWebViewHandler
         var core = wv.CoreWebView2;
         if (core == null) { NoteInitError("engine", "no CoreWebView2"); return; }
         _core = core;
+        try { _topUrl = core.Source; } catch { }
 
         // Dispatch target for the poll transport (and the host object if it
         // ever registers): the same surface, unregistered. Postbacks ride
@@ -165,7 +173,9 @@ public partial class ShellWebViewHandler
         _bridge = new HomeDeckHostObject(msg =>
             MainThread.BeginInvokeOnMainThread(
                 () => { _ = wv.ExecuteScriptAsync($"window.__hdResolveMsg({msg})"); }), _ads,
-            () => { try { PickCancelRequested?.Invoke(); } catch { } });
+            () => { try { PickCancelRequested?.Invoke(); } catch { } },
+            () => _topUrl,
+            (h, u) => AppPickSheet == null ? Task.FromResult("{\"ok\":false,\"error\":\"no-sheet\"}") : AppPickSheet(h, u));
 
         // The host object can throw ERROR_INVALID_STATE while the browser
         // side isn't ready yet, so registration retries on every navigation
@@ -209,6 +219,36 @@ public partial class ShellWebViewHandler
             };
         }
         catch (Exception e) { NoteInitError("reports", e); }
+        // Popup routing (ask every time): a new-window request never
+        // opens an unmanaged window. Defer, prompt on the page (it
+        // pushes the transient page itself for "new window"), then
+        // same-tab here or drop. Null router = block.
+        try
+        {
+            core.NewWindowRequested += (s, e) =>
+            {
+                try
+                {
+                    var uri = e.Uri;
+                    if (string.IsNullOrEmpty(uri)) return;
+                    e.Handled = true;
+                    var def = e.GetDeferral();
+                    _ = Task.Run(async () =>
+                    {
+                        try
+                        {
+                            var r = PopupRouter;
+                            int c = r == null ? 0 : await r(uri);
+                            if (c == 1) { try { await MainThread.InvokeOnMainThreadAsync(() => core.Navigate(uri)); } catch { } }
+                        }
+                        catch { }
+                        finally { try { def.Complete(); } catch { } }
+                    });
+                }
+                catch { try { e.Handled = true; } catch { } }
+            };
+        }
+        catch (Exception e) { NoteInitError("popup", e); }
         // Esc exits: the page's own Esc listener covers web focus; this
         // XAML-level fallback catches Esc when focus is on the shell
         // chrome. (This SDK's CoreWebView2 exposes neither
@@ -261,6 +301,7 @@ public partial class ShellWebViewHandler
         {
             core.NavigationCompleted += async (_, _) =>
             {
+                try { _topUrl = core.Source; } catch { }
                 try { _navHostRetry?.Invoke(); } catch { }
                 try { if (!_hostRegistered) _ = DelayedHostRetryAsync(); } catch { }
                 try { await wv.ExecuteScriptAsync(js); } catch { }

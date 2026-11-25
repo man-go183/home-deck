@@ -36,6 +36,87 @@ class HomeDeckJsBridge : Java.Lang.Object
 
     static string JsonQuote(string s) => "'" + s.Replace("\\", "\\\\").Replace("'", "\\'") + "'";
 
+    /// <summary>Native-observed top page URL (UI-thread hop: bridge
+    /// methods run on a Java thread). Binds file:// grants to the
+    /// actual calling page — never trust the page-supplied host.
+    /// Null = unknown, caller falls back to the legacy host key.</summary>
+    async Task<string?> CallerUrlAsync()
+    {
+        try
+        {
+            return await MainThread.InvokeOnMainThreadAsync(() =>
+            {
+                try
+                {
+                    if (_view.TryGetTarget(out var v) && v.Source is Microsoft.Maui.Controls.UrlWebViewSource u)
+                        return u.Url;
+                    return null;
+                }
+                catch { return null; }
+            });
+        }
+        catch { return null; }
+    }
+
+    /// <summary>File gate with the native-observed caller URL. Never throws.</summary>
+    async Task<bool> GuardAsync(string? host, string op)
+    {
+        try { return await HdFileGuard.EnsureAccessAsync(host, op, await CallerUrlAsync()); }
+        catch { return false; }
+    }
+
+    /// <summary>User-picked app set: native sheet, site learns picked IDs
+    /// only. JavascriptInterface thread; the sheet marshals UI itself.</summary>
+    [Android.Webkit.JavascriptInterface, Java.Interop.Export("pickApps")]
+    public void PickApps(string id, string? host)
+        => Task.Run(async () =>
+        {
+            try
+            {
+                ShellWebViewHandler? hh = null;
+                try { if (_view.TryGetTarget(out var v)) hh = v.Handler as ShellWebViewHandler; } catch { }
+                var sheet = hh?.AppPickSheet;
+                if (sheet == null) { Resolve(id, "{\"ok\":false,\"error\":\"no-sheet\"}"); return; }
+                string json;
+                try { json = await sheet(host, await CallerUrlAsync()) ?? "{\"ok\":false,\"error\":\"cancelled\"}"; }
+                catch (Exception e) { json = "{\"ok\":false,\"error\":" + JsonQuote(e.Message) + "}"; }
+                Resolve(id, json);
+            }
+            catch (Exception e) { Resolve(id, "{\"ok\":false,\"error\":" + JsonQuote(e.Message) + "}"); }
+        });
+
+    /// <summary>Launch a picked app natively. Denied unless the id is in
+    /// the caller's picked set — no arguments, no launch-time prompt.</summary>
+    [Android.Webkit.JavascriptInterface, Java.Interop.Export("openApp")]
+    public void OpenApp(string id, string? host, string? appId)
+        => Task.Run(async () =>
+        {
+            try
+            {
+                var key = HdFileGuard.SiteKey(host, await CallerUrlAsync(), out var hash, out _);
+                appId = (appId ?? "").Trim();
+                if (!HdFileGuard.IsAppPicked(key, hash, appId))
+                { Resolve(id, "{\"ok\":false,\"error\":\"denied\"}"); return; }
+                Resolve(id, await AppInventory.LaunchAsync(appId));
+            }
+            catch (Exception e) { Resolve(id, "{\"ok\":false,\"error\":" + JsonQuote(e.Message) + "}"); }
+        });
+
+    /// <summary>The site's own picked set with live running flags (one
+    /// list for both — no separate task-list API). Unbound callers get
+    /// an empty list (Android: always, running-state dropped there).</summary>
+    [Android.Webkit.JavascriptInterface, Java.Interop.Export("pickedApps")]
+    public void PickedApps(string id, string? host)
+        => Task.Run(() =>
+        {
+            try
+            {
+                var key = HdFileGuard.SiteKey(host, await CallerUrlAsync(), out var hash, out _);
+                Resolve(id, AppInventory.PickedAppsJson(key, hash));
+            }
+            catch (Exception e) { Resolve(id, "{\"ok\":false,\"error\":" + JsonQuote(e.Message) + "}"); }
+        });
+
     [Android.Webkit.JavascriptInterface, Java.Interop.Export("getBattery")] public string GetBattery() => DeviceBridge.GetBattery();
     [Android.Webkit.JavascriptInterface, Java.Interop.Export("getNetwork")] public string GetNetwork() => DeviceBridge.GetNetwork();
     [Android.Webkit.JavascriptInterface, Java.Interop.Export("getDevice")] public string GetDevice() => DeviceBridge.GetDevice();
@@ -317,7 +398,7 @@ class HomeDeckJsBridge : Java.Lang.Object
         {
             try
             {
-                if (!await HdFileGuard.EnsureAccessAsync(host, "list files"))
+                if (!await GuardAsync(host, "list files"))
                 { Resolve(id, "{\"ok\":false,\"error\":\"denied\"}"); return; }
                 if (string.IsNullOrWhiteSpace(path))
                 {
@@ -354,7 +435,7 @@ class HomeDeckJsBridge : Java.Lang.Object
         {
             try
             {
-                if (!await HdFileGuard.EnsureAccessAsync(host, "read file info"))
+                if (!await GuardAsync(host, "read file info"))
                 { Resolve(id, "{\"ok\":false,\"error\":\"denied\"}"); return; }
                 if (!UnderRoot(path, out var full)) { Resolve(id, "{\"ok\":false,\"error\":\"outside-root\"}"); return; }
                 var f = new Java.IO.File(full);
@@ -375,7 +456,7 @@ class HomeDeckJsBridge : Java.Lang.Object
         {
             try
             {
-                if (!await HdFileGuard.EnsureAccessAsync(host, "read files"))
+                if (!await GuardAsync(host, "read files"))
                 { Resolve(id, "{\"ok\":false,\"error\":\"denied\"}"); return; }
                 if (!UnderRoot(path, out var full)) { Resolve(id, "{\"ok\":false,\"error\":\"outside-root\"}"); return; }
                 var f = new Java.IO.File(full);
@@ -397,7 +478,7 @@ class HomeDeckJsBridge : Java.Lang.Object
         {
             try
             {
-                if (!await HdFileGuard.EnsureAccessAsync(host, "write files"))
+                if (!await GuardAsync(host, "write files"))
                 { Resolve(id, "{\"ok\":false,\"error\":\"denied\"}"); return; }
                 if (!UnderRoot(path, out var full)) { Resolve(id, "{\"ok\":false,\"error\":\"outside-root\"}"); return; }
                 if (string.IsNullOrEmpty(base64) || base64.Length > 12L * 1024 * 1024)
@@ -420,7 +501,7 @@ class HomeDeckJsBridge : Java.Lang.Object
         {
             try
             {
-                if (!await HdFileGuard.EnsureAccessAsync(host, "create folders"))
+                if (!await GuardAsync(host, "create folders"))
                 { Resolve(id, "{\"ok\":false,\"error\":\"denied\"}"); return; }
                 if (!UnderRoot(path, out var full)) { Resolve(id, "{\"ok\":false,\"error\":\"outside-root\"}"); return; }
                 System.IO.Directory.CreateDirectory(full);
@@ -435,7 +516,7 @@ class HomeDeckJsBridge : Java.Lang.Object
         {
             try
             {
-                if (!await HdFileGuard.EnsureAccessAsync(host, "delete files"))
+                if (!await GuardAsync(host, "delete files"))
                 { Resolve(id, "{\"ok\":false,\"error\":\"denied\"}"); return; }
                 if (!UnderRoot(path, out var full)) { Resolve(id, "{\"ok\":false,\"error\":\"outside-root\"}"); return; }
                 if (System.IO.File.Exists(full)) System.IO.File.Delete(full);

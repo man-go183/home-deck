@@ -31,6 +31,9 @@ public partial class ShellWebViewHandler
 
         platformView.Settings!.JavaScriptEnabled = true;
         platformView.Settings.DomStorageEnabled = true;
+        platformView.Settings.SetSupportMultipleWindows(true);
+        platformView.Settings.JavaScriptCanOpenWindowsAutomatically = true;
+        platformView.SetWebChromeClient(new ShellWebChromeClient(OnPopupUrl));
         platformView.AddJavascriptInterface(
             new HomeDeckJsBridge((ShellWebView)VirtualView, _ads ?? new AdBlockService(),
                 () => { try { PickCancelRequested?.Invoke(); } catch { } }),
@@ -204,5 +207,77 @@ public partial class ShellWebViewHandler
             if (u.EndsWith(".mp4") || u.EndsWith(".mp3") || u.EndsWith(".webm") || u.EndsWith(".ogg") || u.EndsWith(".m4a")) return "media";
             return "other";
         }
+    }
+
+    /// <summary>Popup interception: every new-window request is captured
+    /// into a throwaway view whose first navigation reveals the URL, then
+    /// routed (cancel / same tab / new shell) — ask every time, and the
+    /// popup page itself never loads anywhere unprompted.</summary>
+    sealed class ShellWebChromeClient : WebChromeClient
+    {
+        readonly Func<string, Task> _onUrl;
+        public ShellWebChromeClient(Func<string, Task> onUrl) { _onUrl = onUrl; }
+
+        public override bool OnCreateWindow(Android.Webkit.WebView? view, bool isDialog, bool isUserGesture, Android.OS.Message? resultMsg)
+        {
+            try
+            {
+                var ctx = view?.Context;
+                if (ctx == null || resultMsg == null) return false;
+                var dummy = new Android.Webkit.WebView(ctx);
+                try { dummy.Settings!.JavaScriptEnabled = true; } catch { }
+                dummy.SetWebViewClient(new PopupCaptureClient(_onUrl));
+                if (resultMsg.Obj is Android.Webkit.WebView.WebViewTransport transport)
+                {
+                    transport.WebView = dummy;
+                    resultMsg.SendToTarget();
+                    return true;
+                }
+                try { dummy.Destroy(); } catch { }
+                return false;
+            }
+            catch { return false; }
+        }
+
+        sealed class PopupCaptureClient : WebViewClient
+        {
+            readonly Func<string, Task> _onUrl;
+            bool _fired;
+            public PopupCaptureClient(Func<string, Task> onUrl) { _onUrl = onUrl; }
+            public override bool ShouldOverrideUrlLoading(Android.Webkit.WebView? v, IWebResourceRequest? request)
+            {
+                try
+                {
+                    var url = request?.Url?.ToString();
+                    if (!_fired && !string.IsNullOrEmpty(url))
+                    {
+                        _fired = true;
+                        var cb = _onUrl;
+                        _ = Task.Run(async () => { try { await cb(url); } catch { } });
+                    }
+                }
+                catch { }
+                try { v?.Destroy(); } catch { }
+                return true;
+            }
+        }
+    }
+
+    /// <summary>Route an intercepted popup URL: the page prompts
+    /// (cancel / same tab / new shell). Same-tab loads here; the
+    /// new-shell push happens inside the page's router.</summary>
+    Task OnPopupUrl(string url)
+    {
+        return Task.Run(async () =>
+        {
+            try
+            {
+                var r = PopupRouter;
+                int c = r == null ? 0 : await r(url);
+                if (c == 1)
+                    MainThread.BeginInvokeOnMainThread(() => { try { _wv?.LoadUrl(url); } catch { } });
+            }
+            catch { }
+        });
     }
 }

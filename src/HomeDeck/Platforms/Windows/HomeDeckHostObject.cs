@@ -15,8 +15,69 @@ public class HomeDeckHostObject
     readonly Action<string> _post;
     readonly AdBlockService? _ads;
     readonly Action _onCancel;
+    readonly Func<string?>? _source;
+    readonly Func<string?, string?, Task<string>>? _appPickSheet;
 
-    public HomeDeckHostObject(Action<string> post, AdBlockService? ads, Action? onCancel = null) { _post = post; _ads = ads; _onCancel = onCancel ?? (() => { }); }
+    public HomeDeckHostObject(Action<string> post, AdBlockService? ads, Action? onCancel = null, Func<string?>? sourceProvider = null, Func<string?, string?, Task<string>>? appPickSheet = null) { _post = post; _ads = ads; _onCancel = onCancel ?? (() => { }); _source = sourceProvider; _appPickSheet = appPickSheet; }
+
+    /// <summary>File gate with the native-observed caller URL: file://
+    /// pages are keyed by their own page file (hash-bound), so a
+    /// replaced homepage re-prompts. Page-supplied host is only the
+    /// fallback identity for non-file callers. Never throws.</summary>
+    Task<bool> Guard(string? host, string op)
+    {
+        try { return HdFileGuard.EnsureAccessAsync(host, op, _source?.Invoke()); }
+        catch { return Task.FromResult(false); }
+    }
+
+    /// <summary>User-picked app set: shows the native sheet (inventory
+    /// stays native-side) and persists the site's picks. The site learns
+    /// only picked IDs. Never throws; answers via postback.</summary>
+    public void pickApps(string id, string? host)
+        => Task.Run(async () =>
+        {
+            try
+            {
+                var sheet = _appPickSheet;
+                if (sheet == null) { _post(JsonPair(id, "{\"ok\":false,\"error\":\"no-sheet\"}")); return; }
+                string json;
+                try { json = await sheet(host, _source?.Invoke()) ?? "{\"ok\":false,\"error\":\"cancelled\"}"; }
+                catch (Exception e) { json = "{\"ok\":false,\"error\":" + Q(e.Message) + "}"; }
+                _post(JsonPair(id, json));
+            }
+            catch (Exception e) { _post(JsonPair(id, "{\"ok\":false,\"error\":" + Q(e.Message) + "}")); }
+        });
+
+    /// <summary>Launch a picked app natively (real OS process). The id must
+    /// be in the caller's picked set or this is denied — no arguments,
+    /// no prompts at launch (the pick was the consent). Never throws.</summary>
+    public void openApp(string id, string? host, string? appId)
+        => Task.Run(async () =>
+        {
+            try
+            {
+                var key = HdFileGuard.SiteKey(host, _source?.Invoke(), out var hash, out _);
+                appId = (appId ?? "").Trim();
+                if (!HdFileGuard.IsAppPicked(key, hash, appId))
+                { _post(JsonPair(id, "{\"ok\":false,\"error\":\"denied\"}")); return; }
+                _post(JsonPair(id, await AppInventory.LaunchAsync(appId)));
+            }
+            catch (Exception e) { _post(JsonPair(id, "{\"ok\":false,\"error\":" + Q(e.Message) + "}")); }
+        });
+
+    /// <summary>The site's own picked set with live running flags (one
+    /// list for both — no separate task-list API). Unbound callers get
+    /// an empty list. Never throws; answers via postback.</summary>
+    public void pickedApps(string id, string? host)
+        => Task.Run(() =>
+        {
+            try
+            {
+                var key = HdFileGuard.SiteKey(host, _source?.Invoke(), out var hash, out _);
+                _post(JsonPair(id, AppInventory.PickedAppsJson(key, hash)));
+            }
+            catch (Exception e) { _post(JsonPair(id, "{\"ok\":false,\"error\":" + Q(e.Message) + "}")); }
+        });
 
     /// <summary>Sync answer to page JS: remove-mode selectors for a host
     /// (JSON array). Called at page load by shell.js.</summary>
@@ -221,7 +282,7 @@ public class HomeDeckHostObject
         {
             try
             {
-                if (!await HdFileGuard.EnsureAccessAsync(host, "list files"))
+                if (!await Guard(host, "list files"))
                 { _post(JsonPair(id, "{\"ok\":false,\"error\":\"denied\"}")); return; }
                 if (string.IsNullOrWhiteSpace(path))
                 {
@@ -259,7 +320,7 @@ public class HomeDeckHostObject
         {
             try
             {
-                if (!await HdFileGuard.EnsureAccessAsync(host, "read file info"))
+                if (!await Guard(host, "read file info"))
                 { _post(JsonPair(id, "{\"ok\":false,\"error\":\"denied\"}")); return; }
                 if (!HdFileGuard.IsUnderRoot(path, out var full))
                 { _post(JsonPair(id, "{\"ok\":false,\"error\":\"outside-root\"}")); return; }
@@ -277,7 +338,7 @@ public class HomeDeckHostObject
         {
             try
             {
-                if (!await HdFileGuard.EnsureAccessAsync(host, "read files"))
+                if (!await Guard(host, "read files"))
                 { _post(JsonPair(id, "{\"ok\":false,\"error\":\"denied\"}")); return; }
                 if (!HdFileGuard.IsUnderRoot(path, out var full) || !System.IO.File.Exists(full))
                 { _post(JsonPair(id, "{\"ok\":false,\"error\":\"not-found\"}")); return; }
@@ -298,7 +359,7 @@ public class HomeDeckHostObject
         {
             try
             {
-                if (!await HdFileGuard.EnsureAccessAsync(host, "write files"))
+                if (!await Guard(host, "write files"))
                 { _post(JsonPair(id, "{\"ok\":false,\"error\":\"denied\"}")); return; }
                 if (!HdFileGuard.IsUnderRoot(path, out var full))
                 { _post(JsonPair(id, "{\"ok\":false,\"error\":\"outside-root\"}")); return; }
@@ -321,7 +382,7 @@ public class HomeDeckHostObject
         {
             try
             {
-                if (!await HdFileGuard.EnsureAccessAsync(host, "create folders"))
+                if (!await Guard(host, "create folders"))
                 { _post(JsonPair(id, "{\"ok\":false,\"error\":\"denied\"}")); return; }
                 if (!HdFileGuard.IsUnderRoot(path, out var full))
                 { _post(JsonPair(id, "{\"ok\":false,\"error\":\"outside-root\"}")); return; }
@@ -336,7 +397,7 @@ public class HomeDeckHostObject
         {
             try
             {
-                if (!await HdFileGuard.EnsureAccessAsync(host, "delete files"))
+                if (!await Guard(host, "delete files"))
                 { _post(JsonPair(id, "{\"ok\":false,\"error\":\"denied\"}")); return; }
                 if (!HdFileGuard.IsUnderRoot(path, out var full))
                 { _post(JsonPair(id, "{\"ok\":false,\"error\":\"outside-root\"}")); return; }

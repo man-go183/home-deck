@@ -135,4 +135,15 @@ public partial class ShellWebViewHandler : WebViewHandler
 
     /// <summary>Undo ArmFramesAsync (snippet removal etc). Sync fire-and-forget.</summary>
     partial void DisarmFrames();
+
+    /// <summary>Native app-pick sheet: given the page-supplied host +
+    /// native-observed caller URL, show the sheet and return the picked
+    /// result JSON (ok/data or ok:false). Wired by the page.</summary>
+    public Func<string?, string?, Task<string>>? AppPickSheet;
+
+    /// <summary>Popup router: the page shows Cancel / Same tab /
+    /// New window and returns 0 / 1 / 2. Wired by the page (it owns
+    /// the prompt + the transient page push); platforms only capture
+    /// the URL and honor 1 themselves (same-tab load). Null = block.</summary>
+    public Func<string, Task<int>>? PopupRouter;
 }

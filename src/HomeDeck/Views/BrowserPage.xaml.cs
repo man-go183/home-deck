@@ -27,6 +27,7 @@ public partial class BrowserPage : ContentPage
     bool _titleViewSet;
 #endif
 
+    bool _transient;
     public BrowserPage(ProfileStore store, AdBlockService ads)
     {
         InitializeComponent();
@@ -55,6 +56,8 @@ public partial class BrowserPage : ContentPage
 #endif
                 hh.CountsChanged = OnCountsChanged;
                 hh.PickCancelRequested = () => CancelPickMode();
+                hh.PopupRouter = RoutePopupAsync;
+                hh.AppPickSheet = PickAppsSheetAsync;
             }
         };
 
@@ -155,8 +158,7 @@ public partial class BrowserPage : ContentPage
 
         try { Window.Title = $"{p.Name} – Home Deck"; } catch { }
 
-        _store.Prefs.LastProfileId = p.Id;
-        _store.SavePrefs();
+        if (!_transient) { _store.Prefs.LastProfileId = p.Id; _store.SavePrefs(); }
         _ads.RefreshDays = _store.Prefs.ListRefreshDays;
         PushListsToAds();
         _ = _ads.EnsureLoadedAsync();
@@ -233,6 +235,103 @@ public partial class BrowserPage : ContentPage
         }
         catch { }
         return p.Url;
+    }
+
+    /// <summary>Native app-pick sheet provider for the bridge: native-only
+    /// inventory + modal multi-select + per-site persist. Returns the
+    /// picked result JSON (ok/data or ok:false). Runs on a bridge thread;
+    /// the modal marshals its own UI. Never throws.</summary>
+    async Task<string> PickAppsSheetAsync(string? host, string? callerUrl)
+    {
+        try
+        {
+            var siteKey = HdFileGuard.SiteKey(host, callerUrl, out var siteHash, out _);
+            if (string.IsNullOrEmpty(siteKey))
+                return "{\"ok\":false,\"error\":\"denied\"}";
+            var apps = await AppInventory.GetInstalledAsync();
+            var current = HdFileGuard.PickedAppIds(siteKey, siteHash);
+            var picked = await AppPickPage.PickAsync(Navigation, apps, current);
+            if (picked == null) return "{\"ok\":false,\"error\":\"cancelled\"}";
+            HdFileGuard.SetAppPicks(siteKey, picked, siteHash);
+            return AppInventory.PickedAppsJson(siteKey, siteHash);
+        }
+        catch (Exception e)
+        {
+            try { return "{\"ok\":false,\"error\":" + System.Text.Json.JsonSerializer.Serialize(e.Message) + "}"; }
+            catch { return "{\"ok\":false,\"error\":\"failed\"}"; }
+        }
+    }
+
+    /// <summary>Transient popup page: loads the URL like a profile but is
+    /// never stored and never becomes LastProfileId (see the guard in
+    /// BindProfile). Back pops it; popups from popups nest the same way.</summary>
+    public void BindPopup(string url)
+    {
+        _transient = true;
+        string name;
+        try
+        {
+            var u = new Uri(url);
+            name = u.Scheme.Equals("file", StringComparison.OrdinalIgnoreCase)
+                ? Path.GetFileName(u.LocalPath) ?? "Popup"
+                : u.Host ?? "Popup";
+        }
+        catch { name = "Popup"; }
+        if (string.IsNullOrEmpty(name)) name = "Popup";
+        BindProfile(new Profile { Id = "popup-" + Guid.NewGuid().ToString("N"), Name = name, Url = url, UseLocal = false, AdBlock = _profile?.AdBlock ?? true });
+    }
+
+    /// <summary>Popup router (ask every time): Cancel / Same tab /
+    /// New window. Runs on any thread; the prompt + push marshal to
+    /// the UI thread. "New window" pushes a transient page itself and
+    /// returns 2 (the platform then does nothing more); 1 means the
+    /// platform loads it same-tab; anything else is cancel. Never throws.</summary>
+    async Task<int> RoutePopupAsync(string url)
+    {
+        try
+        {
+            return await MainThread.InvokeOnMainThreadAsync(async () =>
+            {
+                try
+                {
+                    var opener = _profile?.Name;
+                    if (string.IsNullOrEmpty(opener)) opener = string.IsNullOrEmpty(Web.PageHost) ? "This page" : Web.PageHost;
+                    var choice = await DisplayActionSheetAsync($"{opener} wants to open {PopupDestName(url)}", "Cancel", null, "Same tab", "New window");
+                    if (choice == "Same tab") return 1;
+                    if (choice == "New window")
+                    {
+                        try
+                        {
+                            var page = new BrowserPage(_store, _ads);
+                            page.BindPopup(url);
+                            await Navigation.PushAsync(page);
+                        }
+                        catch { return 0; }
+                        return 2;
+                    }
+                    return 0;
+                }
+                catch { return 0; }
+            });
+        }
+        catch { return 0; }
+    }
+
+    static string PopupDestName(string url)
+    {
+        try
+        {
+            var u = new Uri(url);
+            if (u.Scheme.Equals("file", StringComparison.OrdinalIgnoreCase))
+            {
+                var n = Path.GetFileName(u.LocalPath);
+                return string.IsNullOrEmpty(n) ? "a local file" : n;
+            }
+            if (!string.IsNullOrEmpty(u.Host)) return u.Host;
+        }
+        catch { }
+        var s = (url ?? "").Trim();
+        return s.Length <= 60 ? s : s.Substring(0, 60) + "…";
     }
 
     /// <summary>Begin (or re-begin) loading a profile URL. Only ever called
