@@ -333,7 +333,7 @@ public partial class ShellWebViewHandler
             var bridge = _bridge;
             if (bridge == null) continue;
             string? raw = null;
-            try { raw = await MainThread.InvokeOnMainThreadAsync(() => wv.ExecuteScriptAsync("window.__hdTakeOutbox&&window.__hdTakeOutbox()")); }
+            try { raw = await MainThread.InvokeOnMainThreadAsync(() => wv.ExecuteScriptAsync("window.__hdTakeOutbox&&window.__hdTakeOutbox()").AsTask()); }
             catch { continue; }
             if (string.IsNullOrEmpty(raw)) continue;
             List<OutboxCall>? calls = null;
