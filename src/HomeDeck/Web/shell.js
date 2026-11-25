@@ -297,13 +297,29 @@ window.__hdCountMatches = function (list) {
 
   function onDragUp() { dragPt = null; }
 
+  // Picking is over page-side (bar auto-exits after Hide/Delete): tell
+  // the app too, so it disarms and hides the native pill. Host path only
+  // via the real object with a verified method (same rule as report());
+  // otherwise the hd-cancel message, which the shell maps to its shared
+  // cancel — same as the native ✕ and frame-Esc paths.
+  function notifyDone() {
+    try {
+      var n = window.HomeDeckNative;
+      if (n && typeof n.reportCancel === "function") { try { n.reportCancel.call(n); } catch (e0) {} return; }
+    } catch (e1) {}
+    try {
+      if (window.chrome && window.chrome.webview && window.chrome.webview.postMessage)
+        window.chrome.webview.postMessage(JSON.stringify({ type: "hd-cancel" }));
+    } catch (e2) {}
+  }
+
   function doHide() {
     if (!locked) return;
     var sel = genSelector(locked);
     try { locked.style.setProperty("display", "none", "important"); } catch (e) {}
     var hid = report(window.location.hostname || "", sel, "hide");
     barLabel.textContent = hid ? "Hidden ✓" : "Hidden — NOT saved (no bridge)";
-    setTimeout(exit, hid ? 900 : 2500);
+    setTimeout(function () { exit(); notifyDone(); }, hid ? 900 : 2500);
   }
 
   function doRemove() {
@@ -312,7 +328,7 @@ window.__hdCountMatches = function (list) {
     try { locked.remove(); } catch (e) {}
     var rem = report(window.location.hostname || "", sel, "remove");
     barLabel.textContent = rem ? "Deleted ✓" : "Deleted — NOT saved (no bridge)";
-    setTimeout(exit, rem ? 900 : 2500);
+    setTimeout(function () { exit(); notifyDone(); }, rem ? 900 : 2500);
   }
 
   function cancel() { exit(); }
