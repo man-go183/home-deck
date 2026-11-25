@@ -10,20 +10,18 @@ namespace HomeDeck.Services;
 /// </summary>
 public static class HdFileGuard
 {
-    const string RootKey = "hd.root";
+    // v2: app-private home (LocalAppData). The v1 key ("hd.root",
+    // usually Documents\HomeDeck) is deliberately abandoned so old
+    // installs re-derive instead of clinging to Documents.
+    const string RootKey = "hd.root2";
     const string GrantsKey = "hd.grants";
 
     static readonly System.Text.Json.JsonSerializerOptions Json = new() { WriteIndented = false };
 
     static string DefaultRoot()
     {
-        try
-        {
-            var docs = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
-            if (!string.IsNullOrEmpty(docs))
-                return Path.Combine(docs, "HomeDeck");
-        }
-        catch { }
+        // App-private home: invisible, no OneDrive sync, clean uninstall.
+        // No Documents fallback — the folder is managed, not browsed.
         try { return Path.Combine(FileSystem.AppDataDirectory, "HomeDeck"); }
         catch { return "HomeDeck"; }
     }
