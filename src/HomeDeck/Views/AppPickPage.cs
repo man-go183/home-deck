@@ -79,7 +79,7 @@ public sealed class AppPickPage : ContentPage
             Children = { cancel, ok }
         };
 
-        Content = new Grid
+        var inner = new Grid
         {
             RowDefinitions =
             {
@@ -96,6 +96,24 @@ public sealed class AppPickPage : ContentPage
         Grid.SetRow(list, 2);
         Grid.SetRow(_count, 3);
         Grid.SetRow(bar, 4);
+
+        Color card = Color.FromArgb("#1E1E1E");
+        try { card = (Color)Application.Current.Resources["HdCard"]; } catch { }
+        var dialog = new Border
+        {
+            StrokeShape = new RoundRectangle { CornerRadius = 14 },
+            BackgroundColor = card,
+            Stroke = Color.FromRgba(255, 255, 255, 40),
+            StrokeThickness = 1,
+            Padding = new Thickness(8),
+            HorizontalOptions = LayoutOptions.Center,
+            VerticalOptions = LayoutOptions.Center,
+            MaximumWidthRequest = 520,
+            MaximumHeightRequest = 700,
+            Content = inner,
+        };
+        BackgroundColor = Color.FromRgba(0, 0, 0, 150);
+        Content = new Grid { Children = { dialog } };
         Rebuild(null);
     }
 
