@@ -205,6 +205,11 @@ window.__hdCountMatches = function (list) {
 
   function hideBar() { if (bar) bar.style.display = "none"; }
 
+  // Same convention as the bridge's pgHost(): file:// pages have no
+  // hostname, so they report and match rules as "local" instead of "".
+  // (The shell rejects empty hosts — "" used to die as "bad host".)
+  function pageHost() { try { if (window.location.protocol === "file:") return "local"; return window.location.hostname || ""; } catch (e) { return ""; } }
+
   function report(host, sel, action) {
     var payload = { type: "hd-pick", host: host, selector: sel, action: action };
     try {
@@ -317,7 +322,7 @@ window.__hdCountMatches = function (list) {
     if (!locked) return;
     var sel = genSelector(locked);
     try { locked.style.setProperty("display", "none", "important"); } catch (e) {}
-    var hid = report(window.location.hostname || "", sel, "hide");
+    var hid = report(pageHost(), sel, "hide");
     barLabel.textContent = hid ? "Hidden ✓" : "Hidden — NOT saved (no bridge)";
     setTimeout(function () { exit(); notifyDone(); }, hid ? 900 : 2500);
   }
@@ -326,7 +331,7 @@ window.__hdCountMatches = function (list) {
     if (!locked) return;
     var sel = genSelector(locked);
     try { locked.remove(); } catch (e) {}
-    var rem = report(window.location.hostname || "", sel, "remove");
+    var rem = report(pageHost(), sel, "remove");
     barLabel.textContent = rem ? "Deleted ✓" : "Deleted — NOT saved (no bridge)";
     setTimeout(function () { exit(); notifyDone(); }, rem ? 900 : 2500);
   }
@@ -401,11 +406,13 @@ window.__hdCountMatches = function (list) {
   // slow-building pages. Main document only, v1.
   function applyRemovals() {
     try {
-      var host = window.location.hostname || "";
+      var host = pageHost();
       if (!host) return;
-      var n = window.HomeDeckNative ||
-        (window.chrome && window.chrome.webview && window.chrome.webview.hostObjects && window.chrome.webview.hostObjects.HomeDeckNative);
-      if (!n || !n.getRemoveSelectors) return;
+      // Real object only (same rule as report()): the async proxy would
+      // answer a promise here and JSON.parse would throw — caught, but
+      // pointless. File pages simply skip until a sync proxy exists.
+      var n = window.HomeDeckNative;
+      if (!n || typeof n.getRemoveSelectors !== "function") return;
       var list = JSON.parse(n.getRemoveSelectors(host) || "[]");
       if (!Array.isArray(list)) return;
       list.forEach(function (sel) {
