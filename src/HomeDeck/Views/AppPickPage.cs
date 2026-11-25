@@ -79,7 +79,23 @@ public sealed class AppPickPage : ContentPage
             Children = { cancel, ok }
         };
 
-        Content = new VerticalStackLayout { Children = { title, search, list, _count, bar } };
+        Content = new Grid
+        {
+            RowDefinitions =
+            {
+                new RowDefinition(GridLength.Auto),
+                new RowDefinition(GridLength.Auto),
+                new RowDefinition(GridLength.Star),
+                new RowDefinition(GridLength.Auto),
+                new RowDefinition(GridLength.Auto),
+            },
+            Children = { title, search, list, _count, bar },
+        };
+        Grid.SetRow(title, 0);
+        Grid.SetRow(search, 1);
+        Grid.SetRow(list, 2);
+        Grid.SetRow(_count, 3);
+        Grid.SetRow(bar, 4);
         Rebuild(null);
     }
 
