@@ -1,6 +1,7 @@
 using System.Collections.ObjectModel;
 using HomeDeck.Services;
 using Microsoft.Maui.ApplicationModel;
+using Microsoft.Maui.Controls.Shapes;
 
 namespace HomeDeck.Views;
 
