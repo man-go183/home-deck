@@ -128,7 +128,7 @@ public static class HdFileGuard
                 hash = Convert.ToHexString(sha.ComputeHash(s));
             }
             catch { hash = null; }
-            try { var n = Path.GetFileName(full); if (!string.IsNullOrEmpty(n)) name = n; } catch { }
+            name = FriendlyFileName(full);
             return true;
         }
         catch { return false; }
@@ -464,23 +464,34 @@ public static class HdFileGuard
         try
         {
             if (siteKey.StartsWith("file|", StringComparison.Ordinal))
-            {
-                var full = siteKey.Substring(5);
-                try
-                {
-                    if (string.Equals(Path.GetFileName(Path.GetDirectoryName(full)), "homepages", StringComparison.OrdinalIgnoreCase))
-                    {
-                        var t = HomepageTitleFor?.Invoke(Path.GetFileNameWithoutExtension(full));
-                        if (!string.IsNullOrEmpty(t)) return t;
-                    }
-                }
-                catch { }
-                var n = Path.GetFileName(full);
-                if (!string.IsNullOrEmpty(n)) return n;
-            }
+                return FriendlyFileName(siteKey.Substring(5));
         }
         catch { }
         return string.IsNullOrEmpty(siteKey) ? "This page" : siteKey;
+    }
+
+    /// <summary>Friendly name for a local page file (audit Q1): homepage
+    /// slots are named by profile id (a Guid), so resolve through
+    /// HomepageTitleFor ("ogname · profile") instead of showing the raw
+    /// slot id. Non-slot files fall back to the file name. Never throws.</summary>
+    static string FriendlyFileName(string full)
+    {
+        try
+        {
+            if (string.Equals(Path.GetFileName(Path.GetDirectoryName(full)), "homepages", StringComparison.OrdinalIgnoreCase))
+            {
+                var t = HomepageTitleFor?.Invoke(Path.GetFileNameWithoutExtension(full));
+                if (!string.IsNullOrEmpty(t)) return t;
+            }
+        }
+        catch { }
+        try
+        {
+            var n = Path.GetFileName(full);
+            if (!string.IsNullOrEmpty(n)) return n;
+        }
+        catch { }
+        return "This page";
     }
 
     /// All sites holding permId (exact entries + legacy file bundles).

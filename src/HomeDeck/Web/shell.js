@@ -9,6 +9,35 @@
  */
 (function () {
   if (window.HomeDeck) return;
+  // Audit F3: block weird-scheme same-tab link clicks (javascript:/data:/
+  // intent:/custom) that never raise the native NavigationStarting policy.
+  // http(s)/file/about + relative links pass through to native. Installed
+  // in every frame (top + iframe client below); re-injection safe via the
+  // window.HomeDeck guard above. Never throws.
+  function __hdIsBlockedHref(href) {
+    try {
+      var h = (href || "").trim();
+      if (!h || h[0] === "#") return false;
+      var m = /^([a-zA-Z][a-zA-Z0-9+.-]*):/.exec(h);
+      if (!m) return false;
+      var s = m[1].toLowerCase();
+      return !(s === "http" || s === "https" || s === "file" || s === "about");
+    } catch (e) { return false; }
+  }
+  function __hdTrapClick(e) {
+    try {
+      if (!e || e.defaultPrevented) return;
+      var t = (e.target && e.target.closest) ? e.target.closest("a[href]") : null;
+      if (!t) return;
+      var href = t.getAttribute ? t.getAttribute("href") : t.href;
+      if (__hdIsBlockedHref(href)) {
+        e.preventDefault();
+        e.stopPropagation();
+        if (e.stopImmediatePropagation) e.stopImmediatePropagation();
+      }
+    } catch (err) {}
+  }
+  try { if (document && document.addEventListener) document.addEventListener("click", __hdTrapClick, true); } catch (e) {}
   // Top frame only for DIRECT native access (audit H1). Subframes get
   // the relay client below instead: requests go to the top frame's
   // listener, which stamps the nav token this frame never sees.

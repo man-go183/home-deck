@@ -339,6 +339,18 @@ public partial class BrowserPage : ContentPage
             var u = new Uri(url);
             if (u.Scheme.Equals("file", StringComparison.OrdinalIgnoreCase))
             {
+                // Audit Q1: homepage slots are named by profile id — show the
+                // friendly "ogname · profile" title instead of the raw slot id.
+                try
+                {
+                    var full = System.IO.Path.GetFullPath(u.LocalPath);
+                    if (string.Equals(System.IO.Path.GetFileName(System.IO.Path.GetDirectoryName(full)), "homepages", StringComparison.OrdinalIgnoreCase))
+                    {
+                        var t = HdFileGuard.HomepageTitleFor?.Invoke(System.IO.Path.GetFileNameWithoutExtension(full));
+                        if (!string.IsNullOrEmpty(t)) return t;
+                    }
+                }
+                catch { }
                 var n = Path.GetFileName(u.LocalPath);
                 return string.IsNullOrEmpty(n) ? "a local file" : n;
             }

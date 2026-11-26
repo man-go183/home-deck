@@ -211,7 +211,7 @@ public partial class LauncherPage : ContentPage
         var srcBg = (Color)Application.Current.Resources["HdBg"];
         var linkBtn = new Button { Text = "Link", FontSize = 12, CornerRadius = 8, Padding = new Thickness(14, 6) };
         var fileBtn = new Button { Text = "File", FontSize = 12, CornerRadius = 8, Padding = new Thickness(14, 6) };
-        var fileStatus = new Label { FontSize = 12, TextColor = Colors.White, VerticalOptions = LayoutOptions.Center, HorizontalOptions = LayoutOptions.StartAndExpand };
+        var fileStatus = new Label { FontSize = 12, TextColor = Colors.White, VerticalOptions = LayoutOptions.Center, HorizontalOptions = LayoutOptions.StartAndExpand, LineBreakMode = LineBreakMode.TailTruncation, MaxLines = 1, MaximumWidthRequest = 110 };
         var importBtn = new Button { Text = "Import", FontSize = 12, CornerRadius = 8, Padding = new Thickness(14, 6), BackgroundColor = Colors.Transparent, TextColor = srcDim, BorderColor = srcDim, BorderWidth = 1 };
         var fileRow = new HorizontalStackLayout { Spacing = 8, IsVisible = false };
         fileRow.Children.Add(fileStatus);
@@ -552,6 +552,70 @@ public partial class LauncherPage : ContentPage
             }
             catch { }
         };
+        // New-profile source toggle (audit F2): same Link|File switch as the
+        // edit face. File mode keeps a picked path locally until Add (the
+        // profile — and its slot — doesn't exist yet); empty = "no file yet".
+        bool useLocal = false;
+        string? pickedPath = null;
+        string pickedName = "";
+        var srcGold = (Color)Application.Current.Resources["HdGold"];
+        var srcDim2 = (Color)Application.Current.Resources["HdDim"];
+        var srcBg = (Color)Application.Current.Resources["HdBg"];
+        var linkBtn = new Button { Text = "Link", FontSize = 12, CornerRadius = 8, Padding = new Thickness(14, 6) };
+        var fileBtn = new Button { Text = "File", FontSize = 12, CornerRadius = 8, Padding = new Thickness(14, 6) };
+        var fileStatus = new Label { FontSize = 12, TextColor = Colors.White, VerticalOptions = LayoutOptions.Center, HorizontalOptions = LayoutOptions.StartAndExpand, LineBreakMode = LineBreakMode.TailTruncation, MaxLines = 1, MaximumWidthRequest = 110 };
+        var importBtn = new Button { Text = "Import", FontSize = 12, CornerRadius = 8, Padding = new Thickness(14, 6), BackgroundColor = Colors.Transparent, TextColor = srcDim2, BorderColor = srcDim2, BorderWidth = 1 };
+        var fileRow = new HorizontalStackLayout { Spacing = 8, IsVisible = false };
+        fileRow.Children.Add(fileStatus);
+        fileRow.Children.Add(importBtn);
+        void SyncNewFileStatus()
+        {
+            fileStatus.Text = pickedPath != null ? pickedName : "no file yet";
+        }
+        void SyncNewMode()
+        {
+            bool isFile = useLocal;
+            linkBtn.BackgroundColor = isFile ? Colors.Transparent : srcGold;
+            linkBtn.TextColor = isFile ? srcDim2 : srcBg;
+            linkBtn.BorderWidth = isFile ? 1 : 0;
+            linkBtn.BorderColor = srcDim2;
+            fileBtn.BackgroundColor = isFile ? srcGold : Colors.Transparent;
+            fileBtn.TextColor = isFile ? srcBg : srcDim2;
+            fileBtn.BorderWidth = isFile ? 0 : 1;
+            fileBtn.BorderColor = srcDim2;
+            linkEntry.IsVisible = !isFile;
+            hint.IsVisible = !isFile;
+            warn.IsVisible = !isFile && (linkEntry.Text ?? "").Length > 0 && !AvatarView.IsPerchanceUrl(linkEntry.Text ?? "");
+            fileRow.IsVisible = isFile;
+        }
+        linkBtn.Clicked += (_, _) => { useLocal = false; SyncNewMode(); };
+        fileBtn.Clicked += (_, _) => { useLocal = true; SyncNewMode(); };
+        importBtn.Clicked += async (_, _) =>
+        {
+            try
+            {
+                var pick = await FilePicker.PickAsync(new PickOptions
+                {
+                    PickerTitle = "Import homepage",
+                    FileTypes = HtmlType
+                });
+                var src = pick?.FullPath;
+                if (string.IsNullOrEmpty(src) || !System.IO.File.Exists(src)) return;
+                if (new System.IO.FileInfo(src).Length > 8L * 1024 * 1024)
+                { await DisplayAlertAsync("Too big", "Homepage files are capped at 8 MB.", "OK"); return; }
+                pickedPath = src;
+                pickedName = System.IO.Path.GetFileName(src);
+                useLocal = true;
+                SyncNewFileStatus();
+                SyncNewMode();
+            }
+            catch { }
+        };
+        SyncNewFileStatus();
+        SyncNewMode();
+        var modeRow = new HorizontalStackLayout { Spacing = 7, HorizontalOptions = LayoutOptions.Center };
+        modeRow.Children.Add(linkBtn);
+        modeRow.Children.Add(fileBtn);
         var blockRow = new HorizontalStackLayout { Spacing = 8 };
         var blockChk = new HdCheckBox
         {
@@ -581,7 +645,28 @@ public partial class LauncherPage : ContentPage
             if (url.Length > 0 && !url.StartsWith("http", StringComparison.OrdinalIgnoreCase))
                 url = "https://" + url;
             if (url.Length == 0) url = "https://perchance.org/";
-            _store.Add(name.Length > 0 ? name : "Untitled", url, blockChk.IsChecked);
+            if (!useLocal)
+            {
+                _store.Add(name.Length > 0 ? name : "Untitled", url, blockChk.IsChecked);
+            }
+            else
+            {
+                var p = _store.Add(name.Length > 0 ? name : "Untitled", url, blockChk.IsChecked);
+                p.UseLocal = true;
+                p.HomeFileName = "";
+                try
+                {
+                    if (!string.IsNullOrEmpty(pickedPath) && System.IO.File.Exists(pickedPath))
+                    {
+                        var slot = HdFileGuard.HomepagePath(p.Id);
+                        System.IO.Directory.CreateDirectory(System.IO.Path.GetDirectoryName(slot) ?? "");
+                        System.IO.File.Copy(pickedPath, slot, true);
+                        p.HomeFileName = pickedName;
+                    }
+                }
+                catch { }
+                _store.SaveProfiles();
+            }
             _adding = false;
             BuildCards();
         };
@@ -595,7 +680,7 @@ public partial class LauncherPage : ContentPage
         {
             Spacing = 8, Padding = new Thickness(12, 20, 12, 14),
             WidthRequest = 208, HorizontalOptions = LayoutOptions.Center,
-            Children = { nameEntry, linkEntry, hint, warn, blockRow, add, cancel }
+            Children = { nameEntry, modeRow, linkEntry, hint, warn, fileRow, blockRow, add, cancel }
         };
         return new Border
         {
