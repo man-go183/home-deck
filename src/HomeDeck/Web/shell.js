@@ -9,9 +9,45 @@
  */
 (function () {
   if (window.HomeDeck) return;
+  // Top frame only (audit H1): subframes get no bridge. The equality
+  // check itself is allowed cross-origin; sandboxed frames without
+  // top access fall through the catch.
+  try { if (window.self !== window.top) return; } catch (e) { return; }
 
   var nextId = 1;
   var pending = {};
+  // Per-navigation token (audit H1): native delivers it top-frame-only
+  // after each navigation. No call is emitted before it arrives; every
+  // emitted call carries it first; native rejects anything else.
+  var hdToken = null;
+  var preToken = [];
+  function flushPreToken() {
+    var q = preToken; preToken = [];
+    for (var i = 0; i < q.length; i++) {
+      (function (c) {
+        try {
+          var r = c.exec(hdToken);
+          if (r && typeof r.then === "function") r.then(c.resolve, function (e) { c.resolve({ ok: false, error: String(e && e.message || e) }); });
+          else c.resolve(r);
+        } catch (e) { try { c.resolve({ ok: false, error: String(e && e.message || e) }); } catch (e2) {} }
+      })(q[i]);
+    }
+  }
+  window.__hdTokenArrived = function (t) {
+    try {
+      if (typeof t !== "string" || t.length < 16) return;
+      hdToken = t;
+      flushPreToken();
+    } catch (e) {}
+  };
+  function withToken(name, args, exec) {
+    if (hdToken) { try { return exec(hdToken); } catch (e) { return Promise.resolve({ ok: false, error: String(e && e.message || e) }); } }
+    return new Promise(function (resolve) {
+      var item = { name: name, args: args, exec: exec, resolve: resolve };
+      preToken.push(item);
+      setTimeout(function () { var i = preToken.indexOf(item); if (i >= 0) { preToken.splice(i, 1); resolve({ ok: false, error: "timeout" }); } }, 30000);
+    });
+  }
   // Native proxy resolution: prefer a SYNC proxy (window.HomeDeckNative,
   // else chrome.webview.hostObjects.sync.*). The async promise-proxy
   // (chrome.webview.hostObjects.*) cannot run this object's sync methods,
@@ -35,7 +71,8 @@
 
   // No native proxy: queue for the shell's poll drain instead of failing.
   // The entry resolves via __hdResolveMsg like a normal async call.
-  function enqueueCall(name, args) {
+  // (args are already token-stamped by the caller.)
+  function enqueueCallInner(name, args) {
     var id = nextId++;
     return new Promise(function (resolve) {
       pending[id] = resolve;
@@ -47,23 +84,29 @@
     });
   }
 
+  function enqueueCall(name, args) {
+    return withToken(name, args, function (tok) { return enqueueCallInner(name, [tok].concat(args || [])); });
+  }
+
   function callSync(name, ...args) {
+    return withToken(name, args, function (tok) {
     try {
       var n = getNative();
-      if (!n) return enqueueCall(name, args);
+      if (!n) return enqueueCallInner(name, [tok].concat(args));
       if (!n.p[name]) return Promise.resolve({ ok: false, error: "no-method: " + name });
       if (n.sync) {
-        var r = n.p[name](...args);
+        var r = n.p[name](tok, ...args);
         if (typeof r === "string") return Promise.resolve(JSON.parse(r));
         if (r && typeof r.then === "function") return r.then(x => typeof x === "string" ? JSON.parse(x) : x);
         return Promise.resolve({ ok: false, error: "no-method: " + name });
       }
-      return Promise.resolve(n.p[name](...args)).then(
+      return Promise.resolve(n.p[name](tok, ...args)).then(
         x => { try { return typeof x === "string" ? JSON.parse(x) : x; } catch (e) { return { ok: false, error: String(e) }; } },
         e => ({ ok: false, error: String(e && e.message || e) }));
     } catch (e) {
       return Promise.resolve({ ok: false, error: String(e && e.message || e) });
     }
+    });
   }
 
   // Android resolves callbacks via window.__hdResolve(id, json string).
@@ -82,15 +125,16 @@
   };
 
   function callAsync(name, ...args) {
+    return withToken(name, args, function (tok) {
     var n = getNative();
-    if (!n) return enqueueCall(name, args);
+    if (!n) return enqueueCallInner(name, [tok].concat(args));
     try { if (!n.p[name]) return Promise.resolve({ ok: false, error: "no-method: " + name }); }
     catch (e) { return Promise.resolve({ ok: false, error: String(e && e.message || e) }); }
     var id = nextId++;
     return new Promise(resolve => {
       pending[id] = resolve;
       try {
-        var invoked = n.p[name](id, ...args);
+        var invoked = n.p[name](id, tok, ...args);
         // Async proxy: a rejected invocation means dispatch failed — fail
         // fast instead of waiting out the 30s callback timeout. (The real
         // result still arrives via __hdResolveMsg, as with sync proxies.)
@@ -99,6 +143,7 @@
       }
       catch (e) { delete pending[id]; resolve({ ok: false, error: String(e) }); }
       setTimeout(() => { if (pending[id]) { delete pending[id]; resolve({ ok: false, error: "timeout" }); } }, 30000);
+    });
     });
   }
 
@@ -143,8 +188,12 @@
 
 /* Poll-transport outbox (no native proxy — e.g. Windows file://): calls
  * land here when getNative() finds nothing; the shell drains the queue
- * with script eval and posts answers to __hdResolveMsg. Re-injection
+ * with script eval and posts answers to __hdResolveMsg. Top frame only
+ * (audit H1): subframes neither create nor drain a queue. Re-injection
  * safe: the queue is never wiped, the drainer just re-attached. */
+var __hdIsTop = false;
+try { __hdIsTop = window.self === window.top; } catch (e) {}
+if (__hdIsTop) {
 window.__hdOutbox = window.__hdOutbox || [];
 window.__hdTakeOutbox = function () {
   try {
@@ -153,6 +202,7 @@ window.__hdTakeOutbox = function () {
     return JSON.stringify(q);
   } catch (e) { try { window.__hdOutbox = []; } catch (e2) {} return "[]"; }
 };
+}
 
 /* Hidden-element count for the shell's counter (one pass per load). */
 window.__hdCountMatches = function (list) {

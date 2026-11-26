@@ -17,8 +17,9 @@ public class HomeDeckHostObject
     readonly Action _onCancel;
     readonly Func<string?>? _source;
     readonly Func<string?, string?, Task<string>>? _appPickSheet;
+    readonly Func<string?, bool>? _tokenOk;
 
-    public HomeDeckHostObject(Action<string> post, AdBlockService? ads, Action? onCancel = null, Func<string?>? sourceProvider = null, Func<string?, string?, Task<string>>? appPickSheet = null) { _post = post; _ads = ads; _onCancel = onCancel ?? (() => { }); _source = sourceProvider; _appPickSheet = appPickSheet; }
+    public HomeDeckHostObject(Action<string> post, AdBlockService? ads, Action? onCancel = null, Func<string?>? sourceProvider = null, Func<string?, string?, Task<string>>? appPickSheet = null, Func<string?, bool>? tokenOk = null) { _post = post; _ads = ads; _onCancel = onCancel ?? (() => { }); _source = sourceProvider; _appPickSheet = appPickSheet; _tokenOk = tokenOk; }
 
     /// <summary>File gate with the native-observed caller URL: file://
     /// pages are keyed by their own page file (hash-bound), so a
@@ -30,14 +31,31 @@ public class HomeDeckHostObject
         catch { return Task.FromResult(false); }
     }
 
+    /// <summary>Per-navigation token check (audit H1): every capability
+    /// call carries the token native delivered top-frame-only. Null or
+    /// stale = denied. Fail closed when unwired. Never throws.</summary>
+    bool BadToken(string? tok)
+    {
+        try { var f = _tokenOk; return f == null || !f(tok); }
+        catch { return true; }
+    }
+
+    void DenyToken(string id)
+    {
+        try { _post(JsonPair(id, "{\"ok\":false,\"error\":\"bad-token\"}")); } catch { }
+    }
+
+    string DenyTokenSync() => "{\"ok\":false,\"error\":\"bad-token\"}";
+
     /// <summary>User-picked app set: shows the native sheet (inventory
     /// stays native-side) and persists the site's picks. The site learns
     /// only picked IDs. Never throws; answers via postback.</summary>
-    public void pickApps(string id, string? host)
+    public void pickApps(string id, string? tok, string? host)
         => Task.Run(async () =>
         {
             try
             {
+                if (BadToken(tok)) { DenyToken(id); return; }
                 var sheet = _appPickSheet;
                 if (sheet == null) { _post(JsonPair(id, "{\"ok\":false,\"error\":\"no-sheet\"}")); return; }
                 string json;
@@ -51,11 +69,12 @@ public class HomeDeckHostObject
     /// <summary>Launch a picked app natively (real OS process). The id must
     /// be in the caller's picked set or this is denied — no arguments,
     /// no prompts at launch (the pick was the consent). Never throws.</summary>
-    public void openApp(string id, string? host, string? appId)
+    public void openApp(string id, string? tok, string? host, string? appId)
         => Task.Run(async () =>
         {
             try
             {
+                if (BadToken(tok)) { DenyToken(id); return; }
                 var key = HdFileGuard.SiteKey(host, _source?.Invoke(), out var hash, out _);
                 appId = (appId ?? "").Trim();
                 if (!HdFileGuard.IsAppPicked(key, hash, appId))
@@ -68,11 +87,12 @@ public class HomeDeckHostObject
     /// <summary>The site's own picked set with live running flags (one
     /// list for both — no separate task-list API). Unbound callers get
     /// an empty list. Never throws; answers via postback.</summary>
-    public void pickedApps(string id, string? host)
+    public void pickedApps(string id, string? tok, string? host)
         => Task.Run(() =>
         {
             try
             {
+                if (BadToken(tok)) { DenyToken(id); return; }
                 var key = HdFileGuard.SiteKey(host, _source?.Invoke(), out var hash, out _);
                 _post(JsonPair(id, AppInventory.PickedAppsJson(key, hash)));
             }
@@ -94,45 +114,54 @@ public class HomeDeckHostObject
         try { _onCancel(); } catch { }
     }
 
-    public void getBattery(string id, string? host)
+    public void getBattery(string id, string? tok, string? host)
         => Task.Run(async () =>
         {
             try
             {
+                if (BadToken(tok)) { DenyToken(id); return; }
                 if (!await Guard(host, "read device info")) { _post(JsonPair(id, "{\"ok\":false,\"error\":\"denied\"}")); return; }
                 _post(JsonPair(id, DeviceBridge.GetBattery()));
             }
             catch (Exception e) { _post(JsonPair(id, "{\"ok\":false,\"error\":" + Q(e.Message) + "}")); }
         });
 
-    public void getNetwork(string id, string? host)
+    public void getNetwork(string id, string? tok, string? host)
         => Task.Run(async () =>
         {
             try
             {
+                if (BadToken(tok)) { DenyToken(id); return; }
                 if (!await Guard(host, "read device info")) { _post(JsonPair(id, "{\"ok\":false,\"error\":\"denied\"}")); return; }
                 _post(JsonPair(id, DeviceBridge.GetNetwork()));
             }
             catch (Exception e) { _post(JsonPair(id, "{\"ok\":false,\"error\":" + Q(e.Message) + "}")); }
         });
 
-    public void getDevice(string id, string? host)
+    public void getDevice(string id, string? tok, string? host)
         => Task.Run(async () =>
         {
             try
             {
+                if (BadToken(tok)) { DenyToken(id); return; }
                 if (!await Guard(host, "read device info")) { _post(JsonPair(id, "{\"ok\":false,\"error\":\"denied\"}")); return; }
                 _post(JsonPair(id, DeviceBridge.GetDevice()));
             }
             catch (Exception e) { _post(JsonPair(id, "{\"ok\":false,\"error\":" + Q(e.Message) + "}")); }
         });
-    public string vibrate(int millis) => DeviceBridge.Vibrate(millis);
+    public string vibrate(string? tok, int millis)
+    {
+        try { if (BadToken(tok)) return DenyTokenSync(); }
+        catch { return DenyTokenSync(); }
+        return DeviceBridge.Vibrate(millis);
+    }
 
-    public void bleScan(string id, string? host, int seconds)
+    public void bleScan(string id, string? tok, string? host, int seconds)
         => Task.Run(async () =>
         {
             try
             {
+                if (BadToken(tok)) { DenyToken(id); return; }
                 if (!await Guard(host, "scan nearby devices")) { _post(JsonPair(id, "{\"ok\":false,\"error\":\"denied\"}")); return; }
                 var seen = new System.Collections.Concurrent.ConcurrentDictionary<ulong, (string name, int rssi)>();
                 var watcher = new Windows.Devices.Bluetooth.Advertisement.BluetoothLEAdvertisementWatcher
@@ -164,11 +193,12 @@ public class HomeDeckHostObject
     /// <summary>Read access to toasts via UserNotificationListener. First
     /// call prompts the user (RequestAccessAsync, UI thread); the grant
     /// lives in Settings → Privacy → Notifications.</summary>
-    public void getNotifications(string id, string? host)
+    public void getNotifications(string id, string? tok, string? host)
         => Task.Run(async () =>
         {
             try
             {
+                if (BadToken(tok)) { DenyToken(id); return; }
                 if (!await Guard(host, "read notifications")) { _post(JsonPair(id, "{\"ok\":false,\"error\":\"denied\"}")); return; }
                 var status = await Microsoft.Maui.ApplicationModel.MainThread.InvokeOnMainThreadAsync(
                     () => Windows.UI.Notifications.Management.UserNotificationListener.Current.RequestAccessAsync().AsTask());
@@ -205,21 +235,23 @@ public class HomeDeckHostObject
             catch (Exception e) { _post(JsonPair(id, "{\"ok\":false,\"error\":" + Q(e.Message) + "}")); }
         });
 
-    public string notificationAccess()
+    public string notificationAccess(string? tok)
     {
         try
         {
+            if (BadToken(tok)) return DenyTokenSync();
             var s = Windows.UI.Notifications.Management.UserNotificationListener.Current.GetAccessStatus();
             return "{\"ok\":true,\"data\":{\"enabled\":" + (s == Windows.UI.Notifications.Management.UserNotificationListenerAccessStatus.Allowed ? "true" : "false") + "}}";
         }
         catch (Exception e) { return "{\"ok\":false,\"error\":" + Q(e.Message) + "}"; }
     }
 
-    public void openNotificationSettings(string id)
+    public void openNotificationSettings(string id, string? tok)
         => Task.Run(() =>
         {
             try
             {
+                if (BadToken(tok)) { DenyToken(id); return; }
                 System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
                 {
                     FileName = "ms-settings:privacy-notifications",
@@ -233,17 +265,18 @@ public class HomeDeckHostObject
     /// <summary>System settings deep-links: the app cannot flip radios
     /// itself, so these open the OS page where the user flips the real
     /// toggle. Same delegation pattern as openNotificationSettings.</summary>
-    public void openWifiSettings(string id)
-        => OpenSettingsPage(id, "ms-settings:network-wifi");
+    public void openWifiSettings(string id, string? tok)
+        => OpenSettingsPage(id, tok, "ms-settings:network-wifi");
 
-    public void openBluetoothSettings(string id)
-        => OpenSettingsPage(id, "ms-settings:bluetooth");
+    public void openBluetoothSettings(string id, string? tok)
+        => OpenSettingsPage(id, tok, "ms-settings:bluetooth");
 
-    void OpenSettingsPage(string id, string uri)
+    void OpenSettingsPage(string id, string? tok, string uri)
         => Task.Run(() =>
         {
             try
             {
+                if (BadToken(tok)) { DenyToken(id); return; }
                 System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
                 {
                     FileName = uri,
@@ -257,10 +290,11 @@ public class HomeDeckHostObject
     /// <summary>Windows brightness: WMI for internal displays, DDC/CI for
     /// external. Per-machine — desktops with basic monitors answer to
     /// neither API and get an honest not-implemented.</summary>
-    public string setBrightness(float level)
+    public string setBrightness(string? tok, float level)
     {
         try
         {
+            if (BadToken(tok)) return DenyTokenSync();
             int v = (int)(Math.Clamp(level, 0f, 1f) * 100);
             int applied = 0;
             using var searcher = new System.Management.ManagementObjectSearcher(
@@ -277,10 +311,11 @@ public class HomeDeckHostObject
         catch (Exception e) { return "{\"ok\":false,\"error\":" + Q(e.Message) + "}"; }
     }
 
-    public string getBrightness()
+    public string getBrightness(string? tok)
     {
         try
         {
+            if (BadToken(tok)) return DenyTokenSync();
             using var searcher = new System.Management.ManagementObjectSearcher(
                 new System.Management.ManagementScope(@"\\.\root\wmi"),
                 new System.Management.ObjectQuery("SELECT CurrentBrightness FROM WmiMonitorBrightness"));
@@ -302,17 +337,21 @@ public class HomeDeckHostObject
     /// <summary>Scoped file access: every op below is gated by HdFileGuard —
     /// the path must sit under the app's HomeDeck root AND the calling site
     /// must hold a grant (native allow/deny popup on first use).</summary>
-    public string fileRoot()
+    public string fileRoot(string? tok)
     {
-        try { return "{\"ok\":true,\"data\":{\"root\":" + Q(HdFileGuard.Root) + "}}"; }
+        try
+        {
+            if (BadToken(tok)) return DenyTokenSync();
+            return "{\"ok\":true,\"data\":{\"root\":" + Q(HdFileGuard.Root) + "}}";
         catch (Exception e) { return "{\"ok\":false,\"error\":" + Q(e.Message) + "}"; }
     }
 
-    public void listDir(string id, string? host, string? path)
+    public void listDir(string id, string? tok, string? host, string? path)
         => Task.Run(async () =>
         {
             try
             {
+                if (BadToken(tok)) { DenyToken(id); return; }
                 if (!await Guard(host, "list files"))
                 { _post(JsonPair(id, "{\"ok\":false,\"error\":\"denied\"}")); return; }
                 if (string.IsNullOrWhiteSpace(path))
@@ -346,11 +385,12 @@ public class HomeDeckHostObject
             catch (Exception e) { _post(JsonPair(id, "{\"ok\":false,\"error\":" + Q(e.Message) + "}")); }
         });
 
-    public void fileInfo(string id, string? host, string? path)
+    public void fileInfo(string id, string? tok, string? host, string? path)
         => Task.Run(async () =>
         {
             try
             {
+                if (BadToken(tok)) { DenyToken(id); return; }
                 if (!await Guard(host, "read file info"))
                 { _post(JsonPair(id, "{\"ok\":false,\"error\":\"denied\"}")); return; }
                 if (!HdFileGuard.IsUnderRoot(path, out var full))
@@ -364,11 +404,12 @@ public class HomeDeckHostObject
             catch (Exception e) { _post(JsonPair(id, "{\"ok\":false,\"error\":" + Q(e.Message) + "}")); }
         });
 
-    public void readFile(string id, string? host, string? path)
+    public void readFile(string id, string? tok, string? host, string? path)
         => Task.Run(async () =>
         {
             try
             {
+                if (BadToken(tok)) { DenyToken(id); return; }
                 if (!await Guard(host, "read files"))
                 { _post(JsonPair(id, "{\"ok\":false,\"error\":\"denied\"}")); return; }
                 if (!HdFileGuard.IsUnderRoot(path, out var full) || !System.IO.File.Exists(full))
@@ -385,11 +426,12 @@ public class HomeDeckHostObject
             catch (Exception e) { _post(JsonPair(id, "{\"ok\":false,\"error\":" + Q(e.Message) + "}")); }
         });
 
-    public void writeFile(string id, string? host, string? path, string? base64)
+    public void writeFile(string id, string? tok, string? host, string? path, string? base64)
         => Task.Run(async () =>
         {
             try
             {
+                if (BadToken(tok)) { DenyToken(id); return; }
                 if (!await Guard(host, "write files"))
                 { _post(JsonPair(id, "{\"ok\":false,\"error\":\"denied\"}")); return; }
                 if (!HdFileGuard.IsUnderRoot(path, out var full))
@@ -408,11 +450,12 @@ public class HomeDeckHostObject
             catch (Exception e) { _post(JsonPair(id, "{\"ok\":false,\"error\":" + Q(e.Message) + "}")); }
         });
 
-    public void mkdir(string id, string? host, string? path)
+    public void mkdir(string id, string? tok, string? host, string? path)
         => Task.Run(async () =>
         {
             try
             {
+                if (BadToken(tok)) { DenyToken(id); return; }
                 if (!await Guard(host, "create folders"))
                 { _post(JsonPair(id, "{\"ok\":false,\"error\":\"denied\"}")); return; }
                 if (!HdFileGuard.IsUnderRoot(path, out var full))
@@ -423,11 +466,12 @@ public class HomeDeckHostObject
             catch (Exception e) { _post(JsonPair(id, "{\"ok\":false,\"error\":" + Q(e.Message) + "}")); }
         });
 
-    public void deleteFile(string id, string? host, string? path)
+    public void deleteFile(string id, string? tok, string? host, string? path)
         => Task.Run(async () =>
         {
             try
             {
+                if (BadToken(tok)) { DenyToken(id); return; }
                 if (!await Guard(host, "delete files"))
                 { _post(JsonPair(id, "{\"ok\":false,\"error\":\"denied\"}")); return; }
                 if (!HdFileGuard.IsUnderRoot(path, out var full))
@@ -440,36 +484,43 @@ public class HomeDeckHostObject
             catch (Exception e) { _post(JsonPair(id, "{\"ok\":false,\"error\":" + Q(e.Message) + "}")); }
         });
 
-    public void shareText(string id, string? text, string? title)
-        => Task.Run(async () => _post(JsonPair(id, await DeviceBridge.ShareTextAsync(text, title))));
+    public void shareText(string id, string? tok, string? text, string? title)
+        => Task.Run(async () =>
+        {
+            try { if (BadToken(tok)) { DenyToken(id); return; } } catch { DenyToken(id); return; }
+            try { _post(JsonPair(id, await DeviceBridge.ShareTextAsync(text, title))); } catch { }
+        });
 
-    public void clipboardWrite(string id, string? host, string? text)
+    public void clipboardWrite(string id, string? tok, string? host, string? text)
         => Task.Run(async () =>
         {
             try
             {
+                if (BadToken(tok)) { DenyToken(id); return; }
                 if (!await Guard(host, "write the clipboard")) { _post(JsonPair(id, "{\"ok\":false,\"error\":\"denied\"}")); return; }
                 _post(JsonPair(id, await DeviceBridge.ClipboardWriteAsync(text)));
             }
             catch (Exception e) { _post(JsonPair(id, "{\"ok\":false,\"error\":" + Q(e.Message) + "}")); }
         });
 
-    public void clipboardRead(string id, string? host)
+    public void clipboardRead(string id, string? tok, string? host)
         => Task.Run(async () =>
         {
             try
             {
+                if (BadToken(tok)) { DenyToken(id); return; }
                 if (!await Guard(host, "read the clipboard")) { _post(JsonPair(id, "{\"ok\":false,\"error\":\"denied\"}")); return; }
                 _post(JsonPair(id, await DeviceBridge.ClipboardReadAsync()));
             }
             catch (Exception e) { _post(JsonPair(id, "{\"ok\":false,\"error\":" + Q(e.Message) + "}")); }
         });
 
-    public void notify(string id, string? host, string? title, string? body)
+    public void notify(string id, string? tok, string? host, string? title, string? body)
         => Task.Run(async () =>
         {
             try
             {
+                if (BadToken(tok)) { DenyToken(id); return; }
                 if (!await Guard(host, "send notifications")) { _post(JsonPair(id, "{\"ok\":false,\"error\":\"denied\"}")); return; }
                 var center = Plugin.LocalNotification.LocalNotificationCenter.Current;
                 if (!await center.RequestNotificationPermission())

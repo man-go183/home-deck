@@ -134,6 +134,23 @@ public static class HdFileGuard
         catch { return false; }
     }
 
+    /// <summary>Native-observed http(s) host (audit H1/option 4): when the
+    /// native view URL parses as http(s), it wins over any page-supplied
+    /// host string. Null when not an http(s) URL. Never throws.</summary>
+    public static string? NativeHttpHost(string? callerUrl)
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(callerUrl)) return null;
+            var u = new Uri(callerUrl);
+            if (!u.Scheme.Equals("http", StringComparison.OrdinalIgnoreCase)
+                && !u.Scheme.Equals("https", StringComparison.OrdinalIgnoreCase)) return null;
+            var h = u.Host?.Trim().ToLowerInvariant();
+            return string.IsNullOrEmpty(h) ? null : h;
+        }
+        catch { return null; }
+    }
+
     /// <summary>Native allow/deny for a site. Runs on the UI thread, outside
     /// page content so a site can't fake it. The grant lives in
     /// Preferences; file bytes never do. Fail-safe: any error = no access.
@@ -146,6 +163,14 @@ public static class HdFileGuard
         try
         {
             bool isFile = TryFileCaller(callerUrl, out var fkey, out var fhash, out var fname);
+            if (!isFile)
+            {
+                // Native-observed https identity wins (audit H1): never
+                // key or name a prompt by a page-supplied string when the
+                // view URL is known.
+                var nh = NativeHttpHost(callerUrl);
+                if (nh != null) host = nh;
+            }
             if (!isFile && host.Length == 0) return PromptAsync("This page", op, null, false, false, Perms.Scope(Perms.ForOp(op)));
             string siteKey = isFile ? fkey : host;
             string? siteHash = isFile ? fhash : null;
@@ -255,6 +280,8 @@ public static class HdFileGuard
         {
             if (TryFileCaller(callerUrl, out var key, out var hash, out var name))
             { contentHash = hash; display = name; return key; }
+            var nh = NativeHttpHost(callerUrl);
+            if (nh != null) { contentHash = null; display = nh; return nh; }
         }
         catch { }
         contentHash = null;

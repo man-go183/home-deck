@@ -14,6 +14,15 @@ public partial class ShellWebViewHandler
 {
     AdBlockService? _ads;
     Android.Webkit.WebView? _wv;
+    HomeDeckJsBridge? _bridge;
+
+    /// <summary>Per-navigation bridge token (audit H1): minted fresh on
+    /// every navigation, delivered top-frame-only. Never throws.</summary>
+    static string NewBridgeToken()
+    {
+        try { return Convert.ToHexString(System.Security.Cryptography.RandomNumberGenerator.GetBytes(16)); }
+        catch { return Guid.NewGuid().ToString("N") + Guid.NewGuid().ToString("N"); }
+    }
 
     /// <summary>Fired when any frame asks out of pick mode (Esc).
     /// Wired by the page to its shared cancel.</summary>
@@ -42,10 +51,9 @@ public partial class ShellWebViewHandler
         platformView.Settings.SetSupportMultipleWindows(true);
         platformView.Settings.JavaScriptCanOpenWindowsAutomatically = true;
         platformView.SetWebChromeClient(new ShellWebChromeClient(OnPopupUrl));
-        platformView.AddJavascriptInterface(
-            new HomeDeckJsBridge((ShellWebView)VirtualView, _ads ?? new AdBlockService(),
-                () => { try { PickCancelRequested?.Invoke(); } catch { } }),
-            "HomeDeckNative");
+        _bridge = new HomeDeckJsBridge((ShellWebView)VirtualView, _ads ?? new AdBlockService(),
+            () => { try { PickCancelRequested?.Invoke(); } catch { } });
+        platformView.AddJavascriptInterface(_bridge, "HomeDeckNative");
         platformView.SetWebViewClient(new ShellWebViewClient((ShellWebView)VirtualView, _ads));
 
         _ = InjectShellJsAsync();
@@ -62,6 +70,16 @@ public partial class ShellWebViewHandler
                 v.Navigated += async (_, _) =>
                 {
                     try { await v.EvaluateJavaScriptAsync(js); } catch { }
+                    // Fresh token per navigation, delivered top-frame-only
+                    // (EvaluateJavaScriptAsync runs in the top document).
+                    // shell.js queues calls until this arrives.
+                    try
+                    {
+                        var tok = NewBridgeToken();
+                        try { _bridge?.SetToken(tok); } catch { }
+                        await v.EvaluateJavaScriptAsync("window.__hdTokenArrived&&window.__hdTokenArrived(" + System.Text.Json.JsonSerializer.Serialize(tok) + ")");
+                    }
+                    catch { }
                     try { await InjectCosmeticsAsync(v); } catch { }
                 };
         }
@@ -71,6 +89,8 @@ public partial class ShellWebViewHandler
     protected override void DisconnectHandler(Android.Webkit.WebView platformView)
     {
         try { platformView.RemoveJavascriptInterface("HomeDeckNative"); } catch { }
+        try { _bridge?.SetToken(null); } catch { }
+        _bridge = null;
         if (_wv == platformView) _wv = null;
         base.DisconnectHandler(platformView);
     }

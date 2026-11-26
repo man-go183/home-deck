@@ -32,6 +32,28 @@ public partial class ShellWebViewHandler
     /// to a page-supplied string.</summary>
     volatile string? _topUrl;
 
+    /// <summary>Per-navigation bridge token (audit H1): minted fresh on
+    /// every top navigation, delivered top-frame-only, required on every
+    /// capability call. Memory-only, dies with the view.</summary>
+    volatile string? _bridgeToken;
+
+    static string NewBridgeToken()
+    {
+        try { return Convert.ToHexString(System.Security.Cryptography.RandomNumberGenerator.GetBytes(16)); }
+        catch { return Guid.NewGuid().ToString("N") + Guid.NewGuid().ToString("N"); }
+    }
+
+    static bool TokenEquals(string? a, string? b)
+    {
+        try
+        {
+            if (string.IsNullOrEmpty(a) || string.IsNullOrEmpty(b)) return false;
+            return System.Security.Cryptography.CryptographicOperations.FixedTimeEquals(
+                System.Text.Encoding.UTF8.GetBytes(a), System.Text.Encoding.UTF8.GetBytes(b));
+        }
+        catch { return false; }
+    }
+
     /// <summary>True when consumed: pick mode was armed and is now
     /// cancelled. Wired by the page (it owns the armed flag).</summary>
     public Func<bool>? PickEscPressed;
@@ -68,6 +90,7 @@ public partial class ShellWebViewHandler
         _navHostRetry = null;
         _bridge = null;
         _topUrl = null;
+        _bridgeToken = null;
         try { _pollCts?.Cancel(); } catch { }
         _pollCts = null;
         if (_wv == platformView) _wv = null;
@@ -183,7 +206,8 @@ public partial class ShellWebViewHandler
                 () => { _ = wv.ExecuteScriptAsync($"window.__hdResolveMsg({msg})"); }), _ads,
             () => { try { PickCancelRequested?.Invoke(); } catch { } },
             () => _topUrl,
-            (h, u) => AppPickSheet == null ? Task.FromResult("{\"ok\":false,\"error\":\"no-sheet\"}") : AppPickSheet(h, u));
+            (h, u) => AppPickSheet == null ? Task.FromResult("{\"ok\":false,\"error\":\"no-sheet\"}") : AppPickSheet(h, u),
+            t => TokenEquals(t, _bridgeToken));
 
         // The host object can throw ERROR_INVALID_STATE while the browser
         // side isn't ready yet, so registration retries on every navigation
@@ -313,6 +337,11 @@ public partial class ShellWebViewHandler
                 try { _navHostRetry?.Invoke(); } catch { }
                 try { if (!_hostRegistered) _ = DelayedHostRetryAsync(); } catch { }
                 try { await wv.ExecuteScriptAsync(js); } catch { }
+                // Fresh token per navigation, delivered top-frame-only
+                // (ExecuteScriptAsync runs in the top document). shell.js
+                // queues calls until this arrives.
+                try { _bridgeToken = NewBridgeToken(); } catch { }
+                try { await wv.ExecuteScriptAsync("window.__hdTokenArrived&&window.__hdTokenArrived(" + JsonSerializer.Serialize(_bridgeToken ?? "") + ")"); } catch { }
                 try { await InjectCosmeticsAsync(wv, view); } catch { }
             };
         }
@@ -459,21 +488,36 @@ public partial class ShellWebViewHandler
         var ps = mi.GetParameters();
         try
         {
+            // Every outbox entry carries the nav token first (shell.js
+            // stamps it; audit H1). No token or stale token = denied.
+            string? tok = null;
+            try
+            {
+                if (call.Args.Count > 0 && call.Args[0].ValueKind == JsonValueKind.String)
+                    tok = call.Args[0].GetString();
+            }
+            catch { }
+            if (!TokenEquals(tok, _bridgeToken)) { Post("{\"ok\":false,\"error\":\"bad-token\"}"); return; }
             if (mi.ReturnType == typeof(void))
             {
+                if (ps.Length == 0) { mi.Invoke(bridge, null); Post("{\"ok\":true}"); return; } // reportCancel
+                if (!(ps.Length >= 2 && ps[0].Name == "id" && ps[0].ParameterType == typeof(string)
+                    && ps[1].Name == "tok" && ps[1].ParameterType == typeof(string)))
+                { Post("{\"ok\":false,\"error\":" + JsonSerializer.Serialize("bad-signature: " + call.Method) + "}"); return; }
                 var margs = new object?[ps.Length];
-                int ai = 0;
-                if (ps.Length > 0 && ps[0].Name == "id" && ps[0].ParameterType == typeof(string))
-                { margs[0] = call.Id.ToString(); ai = 1; }
-                for (int i = ai; i < ps.Length; i++)
-                    margs[i] = CoerceArg(ps[i].ParameterType, i - ai < call.Args.Count ? call.Args[i - ai] : default);
+                margs[0] = call.Id.ToString();
+                margs[1] = tok;
+                for (int i = 2; i < ps.Length; i++)
+                    margs[i] = CoerceArg(ps[i].ParameterType, i - 1 < call.Args.Count ? call.Args[i - 1] : default);
                 mi.Invoke(bridge, margs); // async results arrive via the bridge's own postback
-                if (ps.Length == 0) Post("{\"ok\":true}");
             }
             else if (mi.ReturnType == typeof(string))
             {
+                if (!(ps.Length >= 1 && ps[0].Name == "tok" && ps[0].ParameterType == typeof(string)))
+                { Post("{\"ok\":false,\"error\":" + JsonSerializer.Serialize("bad-signature: " + call.Method) + "}"); return; }
                 var margs = new object?[ps.Length];
-                for (int i = 0; i < ps.Length; i++)
+                margs[0] = tok;
+                for (int i = 1; i < ps.Length; i++)
                     margs[i] = CoerceArg(ps[i].ParameterType, i < call.Args.Count ? call.Args[i] : default);
                 var r = (string?)mi.Invoke(bridge, margs);
                 Post(string.IsNullOrEmpty(r) ? "{\"ok\":false,\"error\":\"empty\"}" : r);

@@ -20,6 +20,37 @@ class HomeDeckJsBridge : Java.Lang.Object
     readonly AdBlockService _ads;
     readonly Action _onCancel;
 
+    /// <summary>Per-navigation bridge token (audit H1): set by the
+    /// handler on every navigation (top-frame-only delivery), required
+    /// on every capability call. Memory-only. Never throws.</summary>
+    volatile string? _token;
+
+    internal void SetToken(string? t)
+    {
+        try { _token = t; } catch { }
+    }
+
+    bool TokenOk(string? tok)
+    {
+        try
+        {
+            if (string.IsNullOrEmpty(tok)) return false;
+            var cur = _token;
+            if (string.IsNullOrEmpty(cur)) return false;
+            var x = System.Text.Encoding.UTF8.GetBytes(tok);
+            var y = System.Text.Encoding.UTF8.GetBytes(cur);
+            return System.Security.Cryptography.CryptographicOperations.FixedTimeEquals(x, y);
+        }
+        catch { return false; }
+    }
+
+    void DenyToken(string id)
+    {
+        try { Resolve(id, "{\"ok\":false,\"error\":\"bad-token\"}"); } catch { }
+    }
+
+    string DenyTokenSync() => "{\"ok\":false,\"error\":\"bad-token\"}";
+
     public HomeDeckJsBridge(ShellWebView view, AdBlockService ads, Action? onCancel = null)
     {
         _view = new WeakReference<ShellWebView>(view);
@@ -68,11 +99,12 @@ class HomeDeckJsBridge : Java.Lang.Object
     /// <summary>User-picked app set: native sheet, site learns picked IDs
     /// only. JavascriptInterface thread; the sheet marshals UI itself.</summary>
     [Android.Webkit.JavascriptInterface, Java.Interop.Export("pickApps")]
-    public void PickApps(string id, string? host)
+    public void PickApps(string id, string? tok, string? host)
         => Task.Run(async () =>
         {
             try
             {
+                if (!TokenOk(tok)) { DenyToken(id); return; }
                 ShellWebViewHandler? hh = null;
                 try { if (_view.TryGetTarget(out var v)) hh = v.Handler as ShellWebViewHandler; } catch { }
                 var sheet = hh?.AppPickSheet;
@@ -88,11 +120,12 @@ class HomeDeckJsBridge : Java.Lang.Object
     /// <summary>Launch a picked app natively. Denied unless the id is in
     /// the caller's picked set — no arguments, no launch-time prompt.</summary>
     [Android.Webkit.JavascriptInterface, Java.Interop.Export("openApp")]
-    public void OpenApp(string id, string? host, string? appId)
+    public void OpenApp(string id, string? tok, string? host, string? appId)
         => Task.Run(async () =>
         {
             try
             {
+                if (!TokenOk(tok)) { DenyToken(id); return; }
                 var key = HdFileGuard.SiteKey(host, await CallerUrlAsync(), out var hash, out _);
                 appId = (appId ?? "").Trim();
                 if (!HdFileGuard.IsAppPicked(key, hash, appId))
@@ -106,48 +139,57 @@ class HomeDeckJsBridge : Java.Lang.Object
     /// list for both — no separate task-list API). Unbound callers get
     /// an empty list (Android: always, running-state dropped there).</summary>
     [Android.Webkit.JavascriptInterface, Java.Interop.Export("pickedApps")]
-    public void PickedApps(string id, string? host)
+    public void PickedApps(string id, string? tok, string? host)
         => Task.Run(() =>
         {
             try
             {
+                if (!TokenOk(tok)) { DenyToken(id); return; }
                 var key = HdFileGuard.SiteKey(host, await CallerUrlAsync(), out var hash, out _);
                 Resolve(id, AppInventory.PickedAppsJson(key, hash));
             }
             catch (Exception e) { Resolve(id, "{\"ok\":false,\"error\":" + JsonQuote(e.Message) + "}"); }
         });
 
-    [Android.Webkit.JavascriptInterface, Java.Interop.Export("getBattery")] public void GetBattery(string id, string? host)
+    [Android.Webkit.JavascriptInterface, Java.Interop.Export("getBattery")] public void GetBattery(string id, string? tok, string? host)
         => Task.Run(async () =>
         {
             try
             {
+                if (!TokenOk(tok)) { DenyToken(id); return; }
                 if (!await GuardAsync(host, "read device info")) { Resolve(id, "{\"ok\":false,\"error\":\"denied\"}"); return; }
                 Resolve(id, DeviceBridge.GetBattery());
             }
             catch (Exception e) { Resolve(id, "{\"ok\":false,\"error\":" + JsonQuote(e.Message) + "}"); }
         });
-    [Android.Webkit.JavascriptInterface, Java.Interop.Export("getNetwork")] public void GetNetwork(string id, string? host)
+    [Android.Webkit.JavascriptInterface, Java.Interop.Export("getNetwork")] public void GetNetwork(string id, string? tok, string? host)
         => Task.Run(async () =>
         {
             try
             {
+                if (!TokenOk(tok)) { DenyToken(id); return; }
                 if (!await GuardAsync(host, "read device info")) { Resolve(id, "{\"ok\":false,\"error\":\"denied\"}"); return; }
                 Resolve(id, DeviceBridge.GetNetwork());
             }
             catch (Exception e) { Resolve(id, "{\"ok\":false,\"error\":" + JsonQuote(e.Message) + "}"); }
         });
-    [Android.Webkit.JavascriptInterface, Java.Interop.Export("getDevice")] public void GetDevice(string id, string? host)
+    [Android.Webkit.JavascriptInterface, Java.Interop.Export("getDevice")] public void GetDevice(string id, string? tok, string? host)
         => Task.Run(async () =>
         {
             try
             {
+                if (!TokenOk(tok)) { DenyToken(id); return; }
                 if (!await GuardAsync(host, "read device info")) { Resolve(id, "{\"ok\":false,\"error\":\"denied\"}"); return; }
                 Resolve(id, DeviceBridge.GetDevice());
             }
             catch (Exception e) { Resolve(id, "{\"ok\":false,\"error\":" + JsonQuote(e.Message) + "}"); }
         });
-    [Android.Webkit.JavascriptInterface, Java.Interop.Export("vibrate")] public string Vibrate(int millis) => DeviceBridge.Vibrate(millis);
+    [Android.Webkit.JavascriptInterface, Java.Interop.Export("vibrate")] public string Vibrate(string? tok, int millis)
+    {
+        try { if (!TokenOk(tok)) return DenyTokenSync(); }
+        catch { return DenyTokenSync(); }
+        return DeviceBridge.Vibrate(millis);
+    }
 
     /// <summary>Element picker reports (fire-and-forget): page JS calls
     /// HomeDeckNative.reportPicked/reportRemoved(host, selector). Runs on a
@@ -181,15 +223,20 @@ class HomeDeckJsBridge : Java.Lang.Object
     }
 
     [Android.Webkit.JavascriptInterface, Java.Interop.Export("shareText")]
-    public void ShareText(string id, string? text, string? title)
-        => Task.Run(async () => Resolve(id, await DeviceBridge.ShareTextAsync(text, title)));
+    public void ShareText(string id, string? tok, string? text, string? title)
+        => Task.Run(async () =>
+        {
+            try { if (!TokenOk(tok)) { DenyToken(id); return; } } catch { DenyToken(id); return; }
+            try { Resolve(id, await DeviceBridge.ShareTextAsync(text, title)); } catch { }
+        });
 
     [Android.Webkit.JavascriptInterface, Java.Interop.Export("clipboardWrite")]
-    public void ClipboardWrite(string id, string? host, string? text)
+    public void ClipboardWrite(string id, string? tok, string? host, string? text)
         => Task.Run(async () =>
         {
             try
             {
+                if (!TokenOk(tok)) { DenyToken(id); return; }
                 if (!await GuardAsync(host, "write the clipboard")) { Resolve(id, "{\"ok\":false,\"error\":\"denied\"}"); return; }
                 Resolve(id, await DeviceBridge.ClipboardWriteAsync(text));
             }
@@ -197,11 +244,12 @@ class HomeDeckJsBridge : Java.Lang.Object
         });
 
     [Android.Webkit.JavascriptInterface, Java.Interop.Export("clipboardRead")]
-    public void ClipboardRead(string id, string? host)
+    public void ClipboardRead(string id, string? tok, string? host)
         => Task.Run(async () =>
         {
             try
             {
+                if (!TokenOk(tok)) { DenyToken(id); return; }
                 if (!await GuardAsync(host, "read the clipboard")) { Resolve(id, "{\"ok\":false,\"error\":\"denied\"}"); return; }
                 Resolve(id, await DeviceBridge.ClipboardReadAsync());
             }
@@ -209,11 +257,12 @@ class HomeDeckJsBridge : Java.Lang.Object
         });
 
     [Android.Webkit.JavascriptInterface, Java.Interop.Export("notify")]
-    public void Notify(string id, string? host, string? title, string? body)
+    public void Notify(string id, string? tok, string? host, string? title, string? body)
         => Task.Run(async () =>
         {
             try
             {
+                if (!TokenOk(tok)) { DenyToken(id); return; }
                 if (!await GuardAsync(host, "send notifications")) { Resolve(id, "{\"ok\":false,\"error\":\"denied\"}"); return; }
                 var center = Plugin.LocalNotification.LocalNotificationCenter.Current;
                 if (!await center.RequestNotificationPermission())
@@ -273,11 +322,12 @@ class HomeDeckJsBridge : Java.Lang.Object
     }
 
     [Android.Webkit.JavascriptInterface, Java.Interop.Export("bleScan")]
-    public void BleScan(string id, string? host, int seconds)
+    public void BleScan(string id, string? tok, string? host, int seconds)
         => Task.Run(async () =>
         {
             try
             {
+                if (!TokenOk(tok)) { DenyToken(id); return; }
                 if (!await GuardAsync(host, "scan nearby devices")) { Resolve(id, "{\"ok\":false,\"error\":\"denied\"}"); return; }
                 var st = await Permissions.RequestAsync<BtScanPermission>();
                 if (st != PermissionStatus.Granted) { Resolve(id, "{\"ok\":false,\"error\":\"denied\"}"); return; }
@@ -303,10 +353,11 @@ class HomeDeckJsBridge : Java.Lang.Object
         });
 
     [Android.Webkit.JavascriptInterface, Java.Interop.Export("notificationAccess")]
-    public string NotificationAccess()
+    public string NotificationAccess(string? tok)
     {
         try
         {
+            if (!TokenOk(tok)) return DenyTokenSync();
             var activity = Platform.CurrentActivity;
             if (activity == null) return "{\"ok\":false,\"error\":\"no-activity\"}";
             return "{\"ok\":true,\"data\":{\"enabled\":" + (HdNotificationService.IsEnabled(activity) ? "true" : "false") + "}}";
@@ -315,11 +366,12 @@ class HomeDeckJsBridge : Java.Lang.Object
     }
 
     [Android.Webkit.JavascriptInterface, Java.Interop.Export("openNotificationSettings")]
-    public void OpenNotificationSettings(string id)
+    public void OpenNotificationSettings(string id, string? tok)
         => Task.Run(() =>
         {
             try
             {
+                if (!TokenOk(tok)) { DenyToken(id); return; }
                 var activity = Platform.CurrentActivity;
                 if (activity == null) { Resolve(id, "{\"ok\":false,\"error\":\"no-activity\"}"); return; }
                 var intent = new Android.Content.Intent(Android.Provider.Settings.ActionNotificationListenerSettings);
@@ -331,11 +383,12 @@ class HomeDeckJsBridge : Java.Lang.Object
         });
 
     [Android.Webkit.JavascriptInterface, Java.Interop.Export("openWifiSettings")]
-    public void OpenWifiSettings(string id)
+    public void OpenWifiSettings(string id, string? tok)
         => Task.Run(() =>
         {
             try
             {
+                if (!TokenOk(tok)) { DenyToken(id); return; }
                 var activity = Platform.CurrentActivity;
                 if (activity == null) { Resolve(id, "{\"ok\":false,\"error\":\"no-activity\"}"); return; }
                 var intent = new Android.Content.Intent(Android.Provider.Settings.ActionWifiSettings);
@@ -347,11 +400,12 @@ class HomeDeckJsBridge : Java.Lang.Object
         });
 
     [Android.Webkit.JavascriptInterface, Java.Interop.Export("openBluetoothSettings")]
-    public void OpenBluetoothSettings(string id)
+    public void OpenBluetoothSettings(string id, string? tok)
         => Task.Run(() =>
         {
             try
             {
+                if (!TokenOk(tok)) { DenyToken(id); return; }
                 var activity = Platform.CurrentActivity;
                 if (activity == null) { Resolve(id, "{\"ok\":false,\"error\":\"no-activity\"}"); return; }
                 var intent = new Android.Content.Intent(Android.Provider.Settings.ActionBluetoothSettings);
@@ -363,11 +417,12 @@ class HomeDeckJsBridge : Java.Lang.Object
         });
 
     [Android.Webkit.JavascriptInterface, Java.Interop.Export("getNotifications")]
-    public void GetNotifications(string id, string? host)
+    public void GetNotifications(string id, string? tok, string? host)
         => Task.Run(async () =>
         {
             try
             {
+                if (!TokenOk(tok)) { DenyToken(id); return; }
                 if (!await GuardAsync(host, "read notifications")) { Resolve(id, "{\"ok\":false,\"error\":\"denied\"}"); return; }
                 var activity = Platform.CurrentActivity;
                 if (activity != null && !HdNotificationService.IsEnabled(activity))
@@ -382,10 +437,11 @@ class HomeDeckJsBridge : Java.Lang.Object
         });
 
     [Android.Webkit.JavascriptInterface, Java.Interop.Export("setBrightness")]
-    public string SetBrightness(float level)
+    public string SetBrightness(string? tok, float level)
     {
         try
         {
+            if (!TokenOk(tok)) return DenyTokenSync();
             var activity = Platform.CurrentActivity;
             if (activity?.Window == null) return DeviceBridge.NotImplemented("brightness");
             var attrs = activity.Window.Attributes!;
@@ -397,10 +453,11 @@ class HomeDeckJsBridge : Java.Lang.Object
     }
 
     [Android.Webkit.JavascriptInterface, Java.Interop.Export("getBrightness")]
-    public string GetBrightness()
+    public string GetBrightness(string? tok)
     {
         try
         {
+            if (!TokenOk(tok)) return DenyTokenSync();
             var activity = Platform.CurrentActivity;
             float v = activity?.Window?.Attributes?.ScreenBrightness ?? -1f;
             return "{\"ok\":true,\"data\":{\"level\":" + v.ToString(System.Globalization.CultureInfo.InvariantCulture) + "}}";
@@ -432,18 +489,22 @@ class HomeDeckJsBridge : Java.Lang.Object
     }
 
     [Android.Webkit.JavascriptInterface, Java.Interop.Export("fileRoot")]
-    public string FileRoot()
+    public string FileRoot(string? tok)
     {
-        try { return "{\"ok\":true,\"data\":{\"root\":" + JsonRaw(HdFileGuard.Root) + "}}"; }
+        try
+        {
+            if (!TokenOk(tok)) return DenyTokenSync();
+            return "{\"ok\":true,\"data\":{\"root\":" + JsonRaw(HdFileGuard.Root) + "}}";
         catch (Exception e) { return "{\"ok\":false,\"error\":" + JsonRaw(e.Message) + "}"; }
     }
 
     [Android.Webkit.JavascriptInterface, Java.Interop.Export("listDir")]
-    public void ListDir(string id, string? host, string? path)
+    public void ListDir(string id, string? tok, string? host, string? path)
         => Task.Run(async () =>
         {
             try
             {
+                if (!TokenOk(tok)) { DenyToken(id); return; }
                 if (!await GuardAsync(host, "list files"))
                 { Resolve(id, "{\"ok\":false,\"error\":\"denied\"}"); return; }
                 if (string.IsNullOrWhiteSpace(path))
@@ -476,11 +537,12 @@ class HomeDeckJsBridge : Java.Lang.Object
         });
 
     [Android.Webkit.JavascriptInterface, Java.Interop.Export("fileInfo")]
-    public void FileInfo(string id, string? host, string? path)
+    public void FileInfo(string id, string? tok, string? host, string? path)
         => Task.Run(async () =>
         {
             try
             {
+                if (!TokenOk(tok)) { DenyToken(id); return; }
                 if (!await GuardAsync(host, "read file info"))
                 { Resolve(id, "{\"ok\":false,\"error\":\"denied\"}"); return; }
                 if (!UnderRoot(path, out var full)) { Resolve(id, "{\"ok\":false,\"error\":\"outside-root\"}"); return; }
@@ -497,11 +559,12 @@ class HomeDeckJsBridge : Java.Lang.Object
         });
 
     [Android.Webkit.JavascriptInterface, Java.Interop.Export("readFile")]
-    public void ReadFile(string id, string? host, string? path)
+    public void ReadFile(string id, string? tok, string? host, string? path)
         => Task.Run(async () =>
         {
             try
             {
+                if (!TokenOk(tok)) { DenyToken(id); return; }
                 if (!await GuardAsync(host, "read files"))
                 { Resolve(id, "{\"ok\":false,\"error\":\"denied\"}"); return; }
                 if (!UnderRoot(path, out var full)) { Resolve(id, "{\"ok\":false,\"error\":\"outside-root\"}"); return; }
@@ -519,11 +582,12 @@ class HomeDeckJsBridge : Java.Lang.Object
         });
 
     [Android.Webkit.JavascriptInterface, Java.Interop.Export("writeFile")]
-    public void WriteFile(string id, string? host, string? path, string? base64)
+    public void WriteFile(string id, string? tok, string? host, string? path, string? base64)
         => Task.Run(async () =>
         {
             try
             {
+                if (!TokenOk(tok)) { DenyToken(id); return; }
                 if (!await GuardAsync(host, "write files"))
                 { Resolve(id, "{\"ok\":false,\"error\":\"denied\"}"); return; }
                 if (!UnderRoot(path, out var full)) { Resolve(id, "{\"ok\":false,\"error\":\"outside-root\"}"); return; }
@@ -542,11 +606,12 @@ class HomeDeckJsBridge : Java.Lang.Object
         });
 
     [Android.Webkit.JavascriptInterface, Java.Interop.Export("mkdir")]
-    public void Mkdir(string id, string? host, string? path)
+    public void Mkdir(string id, string? tok, string? host, string? path)
         => Task.Run(async () =>
         {
             try
             {
+                if (!TokenOk(tok)) { DenyToken(id); return; }
                 if (!await GuardAsync(host, "create folders"))
                 { Resolve(id, "{\"ok\":false,\"error\":\"denied\"}"); return; }
                 if (!UnderRoot(path, out var full)) { Resolve(id, "{\"ok\":false,\"error\":\"outside-root\"}"); return; }
@@ -557,11 +622,12 @@ class HomeDeckJsBridge : Java.Lang.Object
         });
 
     [Android.Webkit.JavascriptInterface, Java.Interop.Export("deleteFile")]
-    public void DeleteFile(string id, string? host, string? path)
+    public void DeleteFile(string id, string? tok, string? host, string? path)
         => Task.Run(async () =>
         {
             try
             {
+                if (!TokenOk(tok)) { DenyToken(id); return; }
                 if (!await GuardAsync(host, "delete files"))
                 { Resolve(id, "{\"ok\":false,\"error\":\"denied\"}"); return; }
                 if (!UnderRoot(path, out var full)) { Resolve(id, "{\"ok\":false,\"error\":\"outside-root\"}"); return; }
