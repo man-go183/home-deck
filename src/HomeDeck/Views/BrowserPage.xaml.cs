@@ -1396,12 +1396,12 @@ public partial class BrowserPage : ContentPage
     /// missing system glyph can never tofu-box). Down = collapsed.</summary>
     static Microsoft.Maui.Controls.Shapes.Path Chev(bool open, Color c) => new()
     {
-        Data = (Microsoft.Maui.Controls.Shapes.Geometry)new PathGeometryConverter().ConvertFromInvariantString(open ? "M2 8l4-4 4 4" : "M2 4l4 4 4-4"),
+        Data = (Microsoft.Maui.Controls.Shapes.Geometry)new Microsoft.Maui.Controls.Shapes.PathGeometryConverter().ConvertFromInvariantString(open ? "M2 8l4-4 4 4" : "M2 4l4 4 4-4"),
         Stroke = new SolidColorBrush(c),
         StrokeThickness = 1.8,
-        StrokeLineCap = PenLineCap.Round,
-        StrokeLineJoin = PenLineJoin.Round,
-        Aspect = Microsoft.Maui.Controls.Shapes.Stretch.Uniform,
+        StrokeLineCap = Microsoft.Maui.Controls.Shapes.PenLineCap.Round,
+        StrokeLineJoin = Microsoft.Maui.Controls.Shapes.PenLineJoin.Round,
+        Aspect = Stretch.Uniform,
         WidthRequest = 11,
         HeightRequest = 11,
         HorizontalOptions = LayoutOptions.End,
