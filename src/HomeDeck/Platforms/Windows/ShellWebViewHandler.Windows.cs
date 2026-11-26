@@ -310,7 +310,9 @@ public partial class ShellWebViewHandler
                     }
                     e.Cancel = true;
                     if (verdict == TopNavPolicy.TopVerdict.Block) return;
-                    var def = e.GetDeferral();
+                    // No deferral on this event (unlike NewWindowRequested):
+                    // the navigation is already dead here; the approved
+                    // same-tab load re-navigates below with ExpectedTopUrl.
                     _ = Task.Run(async () =>
                     {
                         try
@@ -320,7 +322,6 @@ public partial class ShellWebViewHandler
                             if (c == 1) { try { ExpectedTopUrl = uri; await MainThread.InvokeOnMainThreadAsync(() => core.Navigate(uri)); } catch { } }
                         }
                         catch { }
-                        finally { try { def.Complete(); } catch { } }
                     });
                 }
                 catch { try { e.Cancel = true; } catch { } }
