@@ -954,7 +954,7 @@ public partial class BrowserPage : ContentPage
                         inner = doc.RootElement.GetString();
                 }
                 catch { }
-                bool on = inner != null && inner.Contains("\\"enabled\\":true");
+                bool on = inner != null && inner.Contains("\"enabled\":true");
                 MainThread.BeginInvokeOnMainThread(() =>
                 {
                     try { sysText.Text = "System notifications: " + (on ? "on" : "off \u2014 turn on in Settings, then pages can ask"); } catch { }
