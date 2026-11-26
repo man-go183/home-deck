@@ -255,6 +255,9 @@ public partial class ShellWebViewHandler
         // opens an unmanaged window. Defer, prompt on the page (it
         // pushes the transient page itself for "new window"), then
         // same-tab here or drop. Null router = block.
+        // Audit M4: only http(s) + file ever reach the prompt — the
+        // router itself drops javascript:/data:/intent:/custom first
+        // (RoutePopupAsync), so those die silent here too.
         try
         {
             core.NewWindowRequested += (s, e) =>
@@ -271,7 +274,7 @@ public partial class ShellWebViewHandler
                         {
                             var r = PopupRouter;
                             int c = r == null ? 0 : await r(uri);
-                            if (c == 1) { try { await MainThread.InvokeOnMainThreadAsync(() => core.Navigate(uri)); } catch { } }
+                            if (c == 1) { try { ExpectedTopUrl = uri; await MainThread.InvokeOnMainThreadAsync(() => core.Navigate(uri)); } catch { } }
                         }
                         catch { }
                         finally { try { def.Complete(); } catch { } }
@@ -281,6 +284,49 @@ public partial class ShellWebViewHandler
             };
         }
         catch (Exception e) { NoteInitError("popup", e); }
+        // Top-navigation policy (audit M3): the same tab travelling on
+        // its own. Programmatic loads (profile open, retry, approved
+        // same-tab) carry ExpectedTopUrl and pass silent; same-site and
+        // about:blank pass silent; cross-site http(s) / other-file ask
+        // via the popup-style router; javascript:/data:/intent:/custom
+        // are cancelled with no prompt — intentional, not a bug.
+        // Residual: silent server redirects that skip this event still
+        // land, but grants stay per-site so nothing is inherited.
+        try
+        {
+            core.NavigationStarting += (s, e) =>
+            {
+                try
+                {
+                    var uri = e.Uri;
+                    if (string.IsNullOrEmpty(uri)) return;
+                    var verdict = TopNavPolicy.Classify(_topUrl, ExpectedTopUrl, uri);
+                    if (verdict == TopNavPolicy.TopVerdict.Allow)
+                    {
+                        if (!string.IsNullOrEmpty(ExpectedTopUrl)
+                            && string.Equals(uri, ExpectedTopUrl, StringComparison.OrdinalIgnoreCase))
+                            ExpectedTopUrl = null;
+                        return;
+                    }
+                    e.Cancel = true;
+                    if (verdict == TopNavPolicy.TopVerdict.Block) return;
+                    var def = e.GetDeferral();
+                    _ = Task.Run(async () =>
+                    {
+                        try
+                        {
+                            var r = PopupRouter;
+                            int c = r == null ? 0 : await r(uri);
+                            if (c == 1) { try { ExpectedTopUrl = uri; await MainThread.InvokeOnMainThreadAsync(() => core.Navigate(uri)); } catch { } }
+                        }
+                        catch { }
+                        finally { try { def.Complete(); } catch { } }
+                    });
+                }
+                catch { try { e.Cancel = true; } catch { } }
+            };
+        }
+        catch (Exception e) { NoteInitError("topnav", e); }
         // Esc exits: the page's own Esc listener covers web focus; this
         // XAML-level fallback catches Esc when focus is on the shell
         // chrome. (This SDK's CoreWebView2 exposes neither

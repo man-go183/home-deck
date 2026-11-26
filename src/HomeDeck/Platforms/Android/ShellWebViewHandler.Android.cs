@@ -54,7 +54,7 @@ public partial class ShellWebViewHandler
         _bridge = new HomeDeckJsBridge((ShellWebView)VirtualView, _ads ?? new AdBlockService(),
             () => { try { PickCancelRequested?.Invoke(); } catch { } });
         platformView.AddJavascriptInterface(_bridge, "HomeDeckNative");
-        platformView.SetWebViewClient(new ShellWebViewClient((ShellWebView)VirtualView, _ads));
+        platformView.SetWebViewClient(new ShellWebViewClient((ShellWebView)VirtualView, _ads, this));
 
         _ = InjectShellJsAsync();
     }
@@ -190,11 +190,59 @@ public partial class ShellWebViewHandler
     {
         readonly ShellWebView _view;
         readonly AdBlockService? _ads;
+        readonly ShellWebViewHandler _owner;
 
-        public ShellWebViewClient(ShellWebView view, AdBlockService? ads)
+        public ShellWebViewClient(ShellWebView view, AdBlockService? ads, ShellWebViewHandler owner)
         {
             _view = view;
             _ads = ads;
+            _owner = owner;
+        }
+
+        /// <summary>Top-navigation policy (audit M3), main frame only:
+        /// programmatic loads (ExpectedTopUrl) and same-site pass
+        /// silent; cross-site http(s) / other-file ask via the
+        /// popup-style router; javascript:/data:/intent:/custom are
+        /// cancelled with no prompt — intentional, not a bug.</summary>
+        public override bool ShouldOverrideUrlLoading(Android.Webkit.WebView? v, IWebResourceRequest? request)
+        {
+            try
+            {
+                if (request == null || !request.IsForMainFrame) return false;
+                var url = request.Url?.ToString();
+                if (string.IsNullOrEmpty(url)) return false;
+                string? cur = null;
+                try { cur = (_view.Source as Microsoft.Maui.Controls.UrlWebViewSource)?.Url; } catch { }
+                var verdict = TopNavPolicy.Classify(cur, _owner.ExpectedTopUrl, url);
+                if (verdict == TopNavPolicy.TopVerdict.Allow)
+                {
+                    if (!string.IsNullOrEmpty(_owner.ExpectedTopUrl)
+                        && string.Equals(url, _owner.ExpectedTopUrl, StringComparison.OrdinalIgnoreCase))
+                        _owner.ExpectedTopUrl = null;
+                    return false;
+                }
+                if (verdict == TopNavPolicy.TopVerdict.Block) return true;
+                var router = _owner.PopupRouter;
+                _ = Task.Run(async () =>
+                {
+                    try
+                    {
+                        int c = router == null ? 0 : await router(url);
+                        if (c == 1)
+                        {
+                            try
+                            {
+                                _owner.ExpectedTopUrl = url;
+                                MainThread.BeginInvokeOnMainThread(() => { try { _owner._wv?.LoadUrl(url); } catch { } });
+                            }
+                            catch { }
+                        }
+                    }
+                    catch { }
+                });
+                return true;
+            }
+            catch { return false; }
         }
 
         public override WebResourceResponse? ShouldInterceptRequest(Android.Webkit.WebView? view, IWebResourceRequest? request)
@@ -292,7 +340,8 @@ public partial class ShellWebViewHandler
     }
 
     /// <summary>Route an intercepted popup URL: the page prompts
-    /// (cancel / same tab / new shell). Same-tab loads here; the
+    /// (cancel / same tab / new shell). Same-tab loads here (with the
+    /// top-nav expectation set so the policy lets it through); the
     /// new-shell push happens inside the page's router.</summary>
     Task OnPopupUrl(string url)
     {
@@ -303,7 +352,10 @@ public partial class ShellWebViewHandler
                 var r = PopupRouter;
                 int c = r == null ? 0 : await r(url);
                 if (c == 1)
+                {
+                    try { ExpectedTopUrl = url; } catch { }
                     MainThread.BeginInvokeOnMainThread(() => { try { _wv?.LoadUrl(url); } catch { } });
+                }
             }
             catch { }
         });

@@ -149,12 +149,19 @@ public class HomeDeckHostObject
             }
             catch (Exception e) { _post(JsonPair(id, "{\"ok\":false,\"error\":" + Q(e.Message) + "}")); }
         });
-    public string vibrate(string? tok, int millis)
-    {
-        try { if (BadToken(tok)) return DenyTokenSync(); }
-        catch { return DenyTokenSync(); }
-        return DeviceBridge.Vibrate(millis);
-    }
+    /// <summary>Audit M6: vibration is a Device-group capability (gated
+    /// like battery/network — consistency for all). Never throws.</summary>
+    public void vibrate(string id, string? tok, string? host, int millis)
+        => Task.Run(async () =>
+        {
+            try
+            {
+                if (BadToken(tok)) { DenyToken(id); return; }
+                if (!await Guard(host, "use vibration")) { _post(JsonPair(id, "{\"ok\":false,\"error\":\"denied\"}")); return; }
+                _post(JsonPair(id, DeviceBridge.Vibrate(millis)));
+            }
+            catch (Exception e) { _post(JsonPair(id, "{\"ok\":false,\"error\":" + Q(e.Message) + "}")); }
+        });
 
     public void bleScan(string id, string? tok, string? host, int seconds)
         => Task.Run(async () =>
@@ -289,62 +296,79 @@ public class HomeDeckHostObject
 
     /// <summary>Windows brightness: WMI for internal displays, DDC/CI for
     /// external. Per-machine — desktops with basic monitors answer to
-    /// neither API and get an honest not-implemented.</summary>
-    public string setBrightness(string? tok, float level)
-    {
-        try
+    /// neither API and get an honest not-implemented. Audit M6: Device
+    /// group, gated like the rest. Never throws.</summary>
+    public void setBrightness(string id, string? tok, string? host, float level)
+        => Task.Run(async () =>
         {
-            if (BadToken(tok)) return DenyTokenSync();
-            int v = (int)(Math.Clamp(level, 0f, 1f) * 100);
-            int applied = 0;
-            using var searcher = new System.Management.ManagementObjectSearcher(
-                new System.Management.ManagementScope(@"\\.\root\wmi"),
-                new System.Management.ObjectQuery("SELECT * FROM WmiMonitorBrightnessMethods"));
-            foreach (System.Management.ManagementObject m in searcher.Get())
+            try
             {
-                try { m.InvokeMethod("WmiSetBrightness", new object[] { (uint)1, (uint)v }); applied++; }
-                catch { }
-            }
-            if (applied == 0) return DeviceBridge.NotImplemented("brightness");
-            return "{\"ok\":true}";
-        }
-        catch (Exception e) { return "{\"ok\":false,\"error\":" + Q(e.Message) + "}"; }
-    }
-
-    public string getBrightness(string? tok)
-    {
-        try
-        {
-            if (BadToken(tok)) return DenyTokenSync();
-            using var searcher = new System.Management.ManagementObjectSearcher(
-                new System.Management.ManagementScope(@"\\.\root\wmi"),
-                new System.Management.ObjectQuery("SELECT CurrentBrightness FROM WmiMonitorBrightness"));
-            foreach (System.Management.ManagementObject m in searcher.Get())
-            {
-                try
+                if (BadToken(tok)) { DenyToken(id); return; }
+                if (!await Guard(host, "set brightness")) { _post(JsonPair(id, "{\"ok\":false,\"error\":\"denied\"}")); return; }
+                int v = (int)(Math.Clamp(level, 0f, 1f) * 100);
+                int applied = 0;
+                using var searcher = new System.Management.ManagementObjectSearcher(
+                    new System.Management.ManagementScope(@"\\.\root\wmi"),
+                    new System.Management.ObjectQuery("SELECT * FROM WmiMonitorBrightnessMethods"));
+                foreach (System.Management.ManagementObject m in searcher.Get())
                 {
-                    var cur = m["CurrentBrightness"];
-                    byte b = cur is byte[] arr && arr.Length > 0 ? arr[0] : Convert.ToByte(cur);
-                    return "{\"ok\":true,\"data\":{\"level\":" + (b / 100.0).ToString(System.Globalization.CultureInfo.InvariantCulture) + "}}";
+                    try { m.InvokeMethod("WmiSetBrightness", new object[] { (uint)1, (uint)v }); applied++; }
+                    catch { }
                 }
-                catch { }
+                _post(JsonPair(id, applied == 0 ? DeviceBridge.NotImplemented("brightness") : "{\"ok\":true}"));
             }
-            return DeviceBridge.NotImplemented("brightness");
-        }
-        catch (Exception e) { return "{\"ok\":false,\"error\":" + Q(e.Message) + "}"; }
-    }
+            catch (Exception e) { _post(JsonPair(id, "{\"ok\":false,\"error\":" + Q(e.Message) + "}")); }
+        });
+
+    public void getBrightness(string id, string? tok, string? host)
+        => Task.Run(async () =>
+        {
+            try
+            {
+                if (BadToken(tok)) { DenyToken(id); return; }
+                if (!await Guard(host, "read brightness")) { _post(JsonPair(id, "{\"ok\":false,\"error\":\"denied\"}")); return; }
+                using var searcher = new System.Management.ManagementObjectSearcher(
+                    new System.Management.ManagementScope(@"\\.\root\wmi"),
+                    new System.Management.ObjectQuery("SELECT CurrentBrightness FROM WmiMonitorBrightness"));
+                foreach (System.Management.ManagementObject m in searcher.Get())
+                {
+                    try
+                    {
+                        var cur = m["CurrentBrightness"];
+                        byte b = cur is byte[] arr && arr.Length > 0 ? arr[0] : Convert.ToByte(cur);
+                        _post(JsonPair(id, "{\"ok\":true,\"data\":{\"level\":" + (b / 100.0).ToString(System.Globalization.CultureInfo.InvariantCulture) + "}}"));
+                        return;
+                    }
+                    catch { }
+                }
+                _post(JsonPair(id, DeviceBridge.NotImplemented("brightness")));
+            }
+            catch (Exception e) { _post(JsonPair(id, "{\"ok\":false,\"error\":" + Q(e.Message) + "}")); }
+        });
 
     /// <summary>Scoped file access: every op below is gated by HdFileGuard —
     /// the path must sit under the app's HomeDeck root AND the calling site
-    /// must hold a grant (native allow/deny popup on first use).</summary>
-    public string fileRoot(string? tok)
-    {
-        try
+    /// must hold a grant (native allow/deny popup on first use).
+    /// Audit M5: fileRoot is split by caller — file-slot pages get the
+    /// real path behind the same Guard gate as listDir (user's own page,
+    /// trusted after prompt); https/blank callers get a blocked answer
+    /// with no prompt (they never need the raw path; the Windows path
+    /// carries the username). The block is intentional, not a bug.</summary>
+    public void fileRoot(string id, string? tok, string? host)
+        => Task.Run(async () =>
         {
-            if (BadToken(tok)) return DenyTokenSync();
-            return "{\"ok\":true,\"data\":{\"root\":" + Q(HdFileGuard.Root) + "}}";
-        catch (Exception e) { return "{\"ok\":false,\"error\":" + Q(e.Message) + "}"; }
-    }
+            try
+            {
+                if (BadToken(tok)) { DenyToken(id); return; }
+                var key = HdFileGuard.SiteKey(host, _source?.Invoke(), out _, out _);
+                if (!key.StartsWith("file|", StringComparison.Ordinal))
+                { _post(JsonPair(id, "{\"ok\":false,\"error\":\"blocked\"}")); return; }
+                if (!await Guard(host, "list files"))
+                { _post(JsonPair(id, "{\"ok\":false,\"error\":\"denied\"}")); return; }
+                _post(JsonPair(id, "{\"ok\":true,\"data\":{\"root\":" + Q(HdFileGuard.Root) + "}}"));
+            }
+            catch (Exception e) { _post(JsonPair(id, "{\"ok\":false,\"error\":" + Q(e.Message) + "}")); }
+        });
 
     public void listDir(string id, string? tok, string? host, string? path)
         => Task.Run(async () =>

@@ -146,4 +146,72 @@ public partial class ShellWebViewHandler : WebViewHandler
     /// the prompt + the transient page push); platforms only capture
     /// the URL and honor 1 themselves (same-tab load). Null = block.</summary>
     public Func<string, Task<int>>? PopupRouter;
+
+    /// <summary>Programmatic top navigation the policy must let through:
+    /// the page sets this to the exact target before navigating itself
+    /// (profile loads, retries, prompt-approved same-tab loads). Checked
+    /// first and cleared on use, so page-driven travel can't borrow it.
+    /// Never persisted. Audit M3.</summary>
+    public string? ExpectedTopUrl;
+}
+
+/// <summary>Audit M3/M4 top-navigation + popup policy (shared by both
+/// platforms and the page router). Profiles are pinned app slots: same
+/// place travels silent, anywhere else asks, weird schemes never load.
+/// The javascript:/data:/intent:/custom blocks below are intentional —
+/// not a bug — there is no current intent: use (logged 2026-11-26), so a
+/// future need reads as a deliberate revisit, not a hunt.</summary>
+public static class TopNavPolicy
+{
+    public enum TopVerdict { Allow, Prompt, Block }
+
+    /// <summary>http(s) + file only. Everything else never gets a prompt.
+    /// Never throws.</summary>
+    public static bool PopupAllowed(string? url)
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(url)) return false;
+            var s = new Uri(url).Scheme.ToLowerInvariant();
+            return s == "http" || s == "https" || s == "file";
+        }
+        catch { return false; }
+    }
+
+    /// <summary>Classify a top-frame travel. currentTop = native-observed
+    /// current URL (null = first load, allow). expected = programmatic
+    /// target set by the page itself. Same-site/same-file/about:blank =
+    /// silent; cross-site http(s) and other-file = ask; everything else =
+    /// block. Unparseable = block (fail closed). Never throws.</summary>
+    public static TopVerdict Classify(string? currentTop, string? expected, string target)
+    {
+        try
+        {
+            var t = (target ?? "").Trim();
+            if (t.Length == 0) return TopVerdict.Block;
+            if (!string.IsNullOrEmpty(expected) && string.Equals(t, expected.Trim(), StringComparison.OrdinalIgnoreCase))
+                return TopVerdict.Allow;
+            var tu = new Uri(t);
+            var ts = tu.Scheme.ToLowerInvariant();
+            if (ts == "about") return TopVerdict.Allow;
+            if (ts != "http" && ts != "https" && ts != "file") return TopVerdict.Block;
+            if (string.IsNullOrWhiteSpace(currentTop)) return TopVerdict.Allow;
+            var cu = new Uri(currentTop);
+            var cs = cu.Scheme.ToLowerInvariant();
+            if (ts == "file" && cs == "file")
+            {
+                try
+                {
+                    var tf = System.IO.Path.GetFullPath(tu.LocalPath).TrimEnd(System.IO.Path.DirectorySeparatorChar, System.IO.Path.AltDirectorySeparatorChar);
+                    var cf = System.IO.Path.GetFullPath(cu.LocalPath).TrimEnd(System.IO.Path.DirectorySeparatorChar, System.IO.Path.AltDirectorySeparatorChar);
+                    return string.Equals(tf, cf, StringComparison.OrdinalIgnoreCase) ? TopVerdict.Allow : TopVerdict.Prompt;
+                }
+                catch { return TopVerdict.Prompt; }
+            }
+            if ((ts == "http" || ts == "https") && (cs == "http" || cs == "https"))
+                return string.Equals(tu.Host, cu.Host, StringComparison.OrdinalIgnoreCase) ? TopVerdict.Allow : TopVerdict.Prompt;
+            return TopVerdict.Prompt; // file<->https crossings always ask
+        }
+        catch { return TopVerdict.Block; }
+    }
 }

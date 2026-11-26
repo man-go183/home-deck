@@ -184,12 +184,20 @@ class HomeDeckJsBridge : Java.Lang.Object
             }
             catch (Exception e) { Resolve(id, "{\"ok\":false,\"error\":" + JsonQuote(e.Message) + "}"); }
         });
-    [Android.Webkit.JavascriptInterface, Java.Interop.Export("vibrate")] public string Vibrate(string? tok, int millis)
-    {
-        try { if (!TokenOk(tok)) return DenyTokenSync(); }
-        catch { return DenyTokenSync(); }
-        return DeviceBridge.Vibrate(millis);
-    }
+    /// <summary>Audit M6: vibration is a Device-group capability (gated
+    /// like battery/network — consistency for all).</summary>
+    [Android.Webkit.JavascriptInterface, Java.Interop.Export("vibrate")]
+    public void Vibrate(string id, string? tok, string? host, int millis)
+        => Task.Run(async () =>
+        {
+            try
+            {
+                if (!TokenOk(tok)) { DenyToken(id); return; }
+                if (!await GuardAsync(host, "use vibration")) { Resolve(id, "{\"ok\":false,\"error\":\"denied\"}"); return; }
+                Resolve(id, DeviceBridge.Vibrate(millis));
+            }
+            catch (Exception e) { Resolve(id, "{\"ok\":false,\"error\":" + JsonQuote(e.Message) + "}"); }
+        });
 
     /// <summary>Element picker reports (fire-and-forget): page JS calls
     /// HomeDeckNative.reportPicked/reportRemoved(host, selector). Runs on a
@@ -436,34 +444,40 @@ class HomeDeckJsBridge : Java.Lang.Object
             catch (Exception e) { Resolve(id, "{\"ok\":false,\"error\":" + JsonQuote(e.Message) + "}"); }
         });
 
+    /// <summary>Audit M6: brightness is a Device-group capability, gated
+    /// like the rest. Never throws.</summary>
     [Android.Webkit.JavascriptInterface, Java.Interop.Export("setBrightness")]
-    public string SetBrightness(string? tok, float level)
-    {
-        try
+    public void SetBrightness(string id, string? tok, string? host, float level)
+        => Task.Run(async () =>
         {
-            if (!TokenOk(tok)) return DenyTokenSync();
-            var activity = Platform.CurrentActivity;
-            if (activity?.Window == null) return DeviceBridge.NotImplemented("brightness");
-            var attrs = activity.Window.Attributes!;
-            attrs.ScreenBrightness = Math.Clamp(level, 0f, 1f);
-            activity.Window.Attributes = attrs;
-            return "{\"ok\":true}";
-        }
-        catch (Exception e) { return "{\"ok\":false,\"error\":" + JsonQuote(e.Message) + "}"; }
-    }
+            try
+            {
+                if (!TokenOk(tok)) { DenyToken(id); return; }
+                if (!await GuardAsync(host, "set brightness")) { Resolve(id, "{\"ok\":false,\"error\":\"denied\"}"); return; }
+                var activity = Platform.CurrentActivity;
+                if (activity?.Window == null) { Resolve(id, DeviceBridge.NotImplemented("brightness")); return; }
+                var attrs = activity.Window.Attributes!;
+                attrs.ScreenBrightness = Math.Clamp(level, 0f, 1f);
+                activity.Window.Attributes = attrs;
+                Resolve(id, "{\"ok\":true}");
+            }
+            catch (Exception e) { Resolve(id, "{\"ok\":false,\"error\":" + JsonQuote(e.Message) + "}"); }
+        });
 
     [Android.Webkit.JavascriptInterface, Java.Interop.Export("getBrightness")]
-    public string GetBrightness(string? tok)
-    {
-        try
+    public void GetBrightness(string id, string? tok, string? host)
+        => Task.Run(async () =>
         {
-            if (!TokenOk(tok)) return DenyTokenSync();
-            var activity = Platform.CurrentActivity;
-            float v = activity?.Window?.Attributes?.ScreenBrightness ?? -1f;
-            return "{\"ok\":true,\"data\":{\"level\":" + v.ToString(System.Globalization.CultureInfo.InvariantCulture) + "}}";
-        }
-        catch (Exception e) { return "{\"ok\":false,\"error\":" + JsonQuote(e.Message) + "}"; }
-    }
+            try
+            {
+                if (!TokenOk(tok)) { DenyToken(id); return; }
+                if (!await GuardAsync(host, "read brightness")) { Resolve(id, "{\"ok\":false,\"error\":\"denied\"}"); return; }
+                var activity = Platform.CurrentActivity;
+                float v = activity?.Window?.Attributes?.ScreenBrightness ?? -1f;
+                Resolve(id, "{\"ok\":true,\"data\":{\"level\":" + v.ToString(System.Globalization.CultureInfo.InvariantCulture) + "}}");
+            }
+            catch (Exception e) { Resolve(id, "{\"ok\":false,\"error\":" + JsonQuote(e.Message) + "}"); }
+        });
 
     static string? PublicDir(string type)
     {
@@ -488,15 +502,26 @@ class HomeDeckJsBridge : Java.Lang.Object
         catch { return false; }
     }
 
+    /// <summary>Audit M5: fileRoot is split by caller — file-slot pages
+    /// get the real path behind the same Guard gate as listDir (user's
+    /// own page, trusted after prompt); https/blank callers get a
+    /// blocked answer with no prompt. Intentional, not a bug.</summary>
     [Android.Webkit.JavascriptInterface, Java.Interop.Export("fileRoot")]
-    public string FileRoot(string? tok)
-    {
-        try
+    public void FileRoot(string id, string? tok, string? host)
+        => Task.Run(async () =>
         {
-            if (!TokenOk(tok)) return DenyTokenSync();
-            return "{\"ok\":true,\"data\":{\"root\":" + JsonRaw(HdFileGuard.Root) + "}}";
-        catch (Exception e) { return "{\"ok\":false,\"error\":" + JsonRaw(e.Message) + "}"; }
-    }
+            try
+            {
+                if (!TokenOk(tok)) { DenyToken(id); return; }
+                var key = HdFileGuard.SiteKey(host, await CallerUrlAsync(), out _, out _);
+                if (!key.StartsWith("file|", StringComparison.Ordinal))
+                { Resolve(id, "{\"ok\":false,\"error\":\"blocked\"}"); return; }
+                if (!await GuardAsync(host, "list files"))
+                { Resolve(id, "{\"ok\":false,\"error\":\"denied\"}"); return; }
+                Resolve(id, "{\"ok\":true,\"data\":{\"root\":" + JsonRaw(HdFileGuard.Root) + "}}");
+            }
+            catch (Exception e) { Resolve(id, "{\"ok\":false,\"error\":" + JsonRaw(e.Message) + "}"); }
+        });
 
     [Android.Webkit.JavascriptInterface, Java.Interop.Export("listDir")]
     public void ListDir(string id, string? tok, string? host, string? path)

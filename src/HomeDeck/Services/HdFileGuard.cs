@@ -151,6 +151,27 @@ public static class HdFileGuard
         catch { return null; }
     }
 
+    /// <summary>Audit M1(a): name the top host in prompts for blank-origin
+    /// callers instead of a bare "This page". "" only reaches here as a
+    /// top-level blank page now (subframes have no bridge): derive an
+    /// honest label from the native-observed URL. Persistence stays off
+    /// for these callers (see EnsureAccessAsync). Never throws.</summary>
+    static string BlankDisplay(string? callerUrl)
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(callerUrl)) return "This page";
+            var u = new Uri(callerUrl);
+            return u.Scheme.ToLowerInvariant() switch
+            {
+                "data" => "This embedded (data:) page",
+                "about" => "This blank page",
+                _ => "This page",
+            };
+        }
+        catch { return "This page"; }
+    }
+
     /// <summary>Native allow/deny for a site. Runs on the UI thread, outside
     /// page content so a site can't fake it. The grant lives in
     /// Preferences; file bytes never do. Fail-safe: any error = no access.
@@ -171,7 +192,7 @@ public static class HdFileGuard
                 var nh = NativeHttpHost(callerUrl);
                 if (nh != null) host = nh;
             }
-            if (!isFile && host.Length == 0) return PromptAsync("This page", op, null, false, false, Perms.Scope(Perms.ForOp(op)));
+            if (!isFile && host.Length == 0) return PromptAsync(BlankDisplay(callerUrl), op, null, false, false, Perms.Scope(Perms.ForOp(op)));
             string siteKey = isFile ? fkey : host;
             string? siteHash = isFile ? fhash : null;
             string display = isFile ? fname : host;
@@ -286,7 +307,7 @@ public static class HdFileGuard
         catch { }
         contentHash = null;
         host = (host ?? "").Trim().ToLowerInvariant();
-        display = string.IsNullOrEmpty(host) ? "This page" : host;
+        display = string.IsNullOrEmpty(host) ? BlankDisplay(callerUrl) : host;
         return host;
     }
 
@@ -404,7 +425,7 @@ public static class HdFileGuard
             "read the clipboard" or "write the clipboard" => Clipboard,
             "read notifications" or "send notifications" => Notifications,
             "scan nearby devices" => Nearby,
-            "read device info" => Device,
+            "read device info" or "use vibration" or "read brightness" or "set brightness" => Device,
             _ => null,
         };
         public static string Key(string siteKey, string perm) => siteKey + "||" + perm;

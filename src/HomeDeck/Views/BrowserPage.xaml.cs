@@ -296,11 +296,15 @@ public partial class BrowserPage : ContentPage
     /// New window. Runs on any thread; the prompt + push marshal to
     /// the UI thread. "New window" pushes a transient page itself and
     /// returns 2 (the platform then does nothing more); 1 means the
-    /// platform loads it same-tab; anything else is cancel. Never throws.</summary>
+    /// platform loads it same-tab; anything else is cancel. Audit M4:
+    /// only http(s) + file ever reach the prompt — javascript:/data:/
+    /// intent:/custom return 0 (blocked) with no prompt. Intentional,
+    /// not a bug. Never throws.</summary>
     async Task<int> RoutePopupAsync(string url)
     {
         try
         {
+            if (!TopNavPolicy.PopupAllowed(url)) return 0;
             return await MainThread.InvokeOnMainThreadAsync(async () =>
             {
                 try
@@ -362,6 +366,7 @@ public partial class BrowserPage : ContentPage
             return;
         }
         Web.Source = new UrlWebViewSource { Url = target };
+        try { if (Web.Handler is ShellWebViewHandler hh) hh.ExpectedTopUrl = target; } catch { }
         Web.ResetBlockedCount();
         Web.ResetHiddenCount();
         _sessionPicks.Clear();
@@ -396,8 +401,10 @@ public partial class BrowserPage : ContentPage
                         {
                             SplashStatus.Text = "Retrying…";
                             SplashStatus.IsVisible = true;
+                            var rt = TargetUrl(p);
                             Web.Source = null;
-                            Web.Source = new UrlWebViewSource { Url = TargetUrl(p) };
+                            Web.Source = new UrlWebViewSource { Url = rt };
+                            try { if (Web.Handler is ShellWebViewHandler hh2) hh2.ExpectedTopUrl = rt; } catch { }
                         }
                     }
                     catch { }
