@@ -19,16 +19,49 @@ public class HomeDeckHostObject
     readonly Func<string?, string?, Task<string>>? _appPickSheet;
     readonly Func<string?, bool>? _tokenOk;
 
+    /// <summary>Relay identity (audit relay): while set, Guard/SiteKey
+    /// use this browser-stamped frame origin instead of any page-supplied
+    /// host AND skip the native top-host override. Only the relay entry
+    /// sets it, only with a valid nav token, only from an isTrusted
+    /// frame message — so the value is trustworthy. AsyncLocal keeps
+    /// concurrent relayed calls isolated. Never throws.</summary>
+    readonly System.Threading.AsyncLocal<string?> _relayHost = new();
+
     public HomeDeckHostObject(Action<string> post, AdBlockService? ads, Action? onCancel = null, Func<string?>? sourceProvider = null, Func<string?, string?, Task<string>>? appPickSheet = null, Func<string?, bool>? tokenOk = null) { _post = post; _ads = ads; _onCancel = onCancel ?? (() => { }); _source = sourceProvider; _appPickSheet = appPickSheet; _tokenOk = tokenOk; }
 
     /// <summary>File gate with the native-observed caller URL: file://
     /// pages are keyed by their own page file (hash-bound), so a
     /// replaced homepage re-prompts. Page-supplied host is only the
-    /// fallback identity for non-file callers. Never throws.</summary>
+    /// fallback identity for non-file callers. Relayed calls use the
+    /// browser-stamped frame origin instead (top override skipped).
+    /// Never throws.</summary>
     Task<bool> Guard(string? host, string op)
     {
-        try { return HdFileGuard.EnsureAccessAsync(host, op, _source?.Invoke()); }
+        try
+        {
+            var rh = _relayHost.Value;
+            if (rh != null) return HdFileGuard.EnsureAccessAsync(rh, op, null);
+            return HdFileGuard.EnsureAccessAsync(host, op, _source?.Invoke());
+        }
         catch { return Task.FromResult(false); }
+    }
+
+    /// <summary>Relay-aware site identity (see _relayHost). Never throws.</summary>
+    string SiteKeyFor(string? host, out string? hash, out string display)
+    {
+        try
+        {
+            var rh = _relayHost.Value;
+            if (rh != null) return HdFileGuard.SiteKey(rh, null, out hash, out display);
+            return HdFileGuard.SiteKey(host, _source?.Invoke(), out hash, out display);
+        }
+        catch { hash = null; display = "This page"; return host ?? ""; }
+    }
+
+    /// <summary>Relay-aware host (see _relayHost). Never throws.</summary>
+    string HostFor(string? host)
+    {
+        try { return _relayHost.Value ?? host ?? ""; } catch { return host ?? ""; }
     }
 
     /// <summary>Per-navigation token check (audit H1): every capability
@@ -59,7 +92,7 @@ public class HomeDeckHostObject
                 var sheet = _appPickSheet;
                 if (sheet == null) { _post(JsonPair(id, "{\"ok\":false,\"error\":\"no-sheet\"}")); return; }
                 string json;
-                try { json = await sheet(host, _source?.Invoke()) ?? "{\"ok\":false,\"error\":\"cancelled\"}"; }
+                try { json = await sheet(HostFor(host), _relayHost.Value != null ? null : _source?.Invoke()) ?? "{\"ok\":false,\"error\":\"cancelled\"}"; }
                 catch (Exception e) { json = "{\"ok\":false,\"error\":" + Q(e.Message) + "}"; }
                 _post(JsonPair(id, json));
             }
@@ -75,7 +108,7 @@ public class HomeDeckHostObject
             try
             {
                 if (BadToken(tok)) { DenyToken(id); return; }
-                var key = HdFileGuard.SiteKey(host, _source?.Invoke(), out var hash, out _);
+                var key = SiteKeyFor(host, out var hash, out _);
                 appId = (appId ?? "").Trim();
                 if (!HdFileGuard.IsAppPicked(key, hash, appId))
                 { _post(JsonPair(id, "{\"ok\":false,\"error\":\"denied\"}")); return; }
@@ -93,7 +126,7 @@ public class HomeDeckHostObject
             try
             {
                 if (BadToken(tok)) { DenyToken(id); return; }
-                var key = HdFileGuard.SiteKey(host, _source?.Invoke(), out var hash, out _);
+                var key = SiteKeyFor(host, out var hash, out _);
                 _post(JsonPair(id, AppInventory.PickedAppsJson(key, hash)));
             }
             catch (Exception e) { _post(JsonPair(id, "{\"ok\":false,\"error\":" + Q(e.Message) + "}")); }
@@ -103,7 +136,7 @@ public class HomeDeckHostObject
     /// (JSON array). Called at page load by shell.js.</summary>
     public string getRemoveSelectors(string host)
     {
-        try { return _ads?.GetRemoveSelectorsJson(host) ?? "[]"; }
+        try { return _ads?.GetRemoveSelectorsJson(HostFor(host)) ?? "[]"; }
         catch { return "[]"; }
     }
 
@@ -562,6 +595,111 @@ public class HomeDeckHostObject
             }
             catch (Exception e) { _post(JsonPair(id, "{\"ok\":false,\"error\":\"" + e.Message + "\"}")); }
         });
+
+    /// <summary>Subframe relay (audit relay): invoked ONLY by the top
+    /// frame's shell.js listener (isTrusted frame message) with the nav
+    /// token this closure holds. origin is browser-stamped and becomes
+    /// the grant identity for this call (top-host override skipped via
+    /// _relayHost); method allowlist excludes relay itself. Answers via
+    /// the method's own postback under the same id. Never throws.</summary>
+    public void relay(string id, string? tok, string? origin, string? method, string? argsJson)
+        => Task.Run(() =>
+        {
+            try
+            {
+                if (BadToken(tok)) { DenyToken(id); return; }
+                if (string.IsNullOrWhiteSpace(method) || method.Equals("relay", StringComparison.OrdinalIgnoreCase))
+                { _post(JsonPair(id, "{\"ok\":false,\"error\":\"bad-method\"}")); return; }
+                System.Reflection.MethodInfo? mi = null;
+                try { mi = typeof(HomeDeckHostObject).GetMethod(method, System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.IgnoreCase); }
+                catch { }
+                if (mi == null) { _post(JsonPair(id, "{\"ok\":false,\"error\":" + Q("no-method: " + method) + "}")); return; }
+                var ps = mi.GetParameters();
+                bool noArgs = ps.Length == 0;
+                bool syncString = mi.ReturnType == typeof(string);
+                bool asyncVoid = mi.ReturnType == typeof(void) && ps.Length >= 2 && ps[0].Name == "id" && ps[0].ParameterType == typeof(string)
+                    && ps[1].Name == "tok" && ps[1].ParameterType == typeof(string);
+                if (!noArgs && !asyncVoid && !(syncString && ps.Length >= 1 && ps[0].Name == "tok" && ps[0].ParameterType == typeof(string)))
+                { _post(JsonPair(id, "{\"ok\":false,\"error\":\"bad-signature\"}")); return; }
+                string rhost;
+                try
+                {
+                    if (string.IsNullOrEmpty(origin) || origin == "null") rhost = "";
+                    else rhost = new Uri(origin).Host?.Trim().ToLowerInvariant() ?? "";
+                }
+                catch { rhost = ""; }
+                System.Text.Json.JsonElement[] rargs;
+                try
+                {
+                    using var doc = System.Text.Json.JsonDocument.Parse(string.IsNullOrEmpty(argsJson) ? "[]" : argsJson);
+                    rargs = doc.RootElement.ValueKind == System.Text.Json.JsonValueKind.Array
+                        ? doc.RootElement.EnumerateArray().ToArray() : Array.Empty<System.Text.Json.JsonElement>();
+                }
+                catch { rargs = Array.Empty<System.Text.Json.JsonElement>(); }
+                _relayHost.Value = rhost;
+                try
+                {
+                    if (noArgs) { mi.Invoke(this, null); _post(JsonPair(id, "{\"ok\":true}")); return; }
+                    if (syncString)
+                    {
+                        var margs = new object?[ps.Length];
+                        margs[0] = tok;
+                        for (int i = 1; i < ps.Length; i++)
+                            margs[i] = CoerceRelay(ps[i].ParameterType, i - 1 < rargs.Length ? rargs[i - 1] : default);
+                        var r = (string?)mi.Invoke(this, margs);
+                        _post(JsonPair(id, string.IsNullOrEmpty(r) ? "{\"ok\":false,\"error\":\"empty\"}" : r));
+                        return;
+                    }
+                    var vargs = new object?[ps.Length];
+                    vargs[0] = id; vargs[1] = tok;
+                    for (int i = 2; i < ps.Length; i++)
+                        vargs[i] = CoerceRelay(ps[i].ParameterType, i - 2 < rargs.Length ? rargs[i - 2] : default);
+                    mi.Invoke(this, vargs); // async results arrive via the method's own postback under the same id
+                }
+                finally { _relayHost.Value = null; }
+            }
+            catch (Exception e)
+            {
+                var inner = e is System.Reflection.TargetInvocationException tie && tie.InnerException != null ? tie.InnerException : e;
+                _post(JsonPair(id, "{\"ok\":false,\"error\":" + Q(TruncRelay(inner.Message)) + "}"));
+            }
+        });
+
+    /// <summary>JSON value to a bridge parameter type (covers the whole
+    /// surface: string/int/float/bool). Never throws.</summary>
+    static object? CoerceRelay(Type t, System.Text.Json.JsonElement el)
+    {
+        try
+        {
+            if (el.ValueKind == System.Text.Json.JsonValueKind.Undefined || el.ValueKind == System.Text.Json.JsonValueKind.Null)
+                return t == typeof(string) ? null : (t.IsValueType ? Activator.CreateInstance(t) : null);
+            if (t == typeof(string)) return el.ValueKind == System.Text.Json.JsonValueKind.String ? el.GetString() : el.ToString();
+            if (t == typeof(int))
+            {
+                if (el.ValueKind == System.Text.Json.JsonValueKind.Number && el.TryGetInt32(out var n)) return n;
+                if (el.ValueKind == System.Text.Json.JsonValueKind.String && int.TryParse(el.GetString(), out n)) return n;
+                return 0;
+            }
+            if (t == typeof(float))
+            {
+                if (el.ValueKind == System.Text.Json.JsonValueKind.Number && el.TryGetSingle(out var x)) return x;
+                if (el.ValueKind == System.Text.Json.JsonValueKind.String && float.TryParse(el.GetString(), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out x)) return x;
+                return 0f;
+            }
+            if (t == typeof(bool))
+            {
+                if (el.ValueKind == System.Text.Json.JsonValueKind.True) return true;
+                if (el.ValueKind == System.Text.Json.JsonValueKind.False) return false;
+                if (el.ValueKind == System.Text.Json.JsonValueKind.String && bool.TryParse(el.GetString(), out var b)) return b;
+                return false;
+            }
+        }
+        catch { }
+        try { return t.IsValueType ? Activator.CreateInstance(t) : null; } catch { return null; }
+    }
+
+    static string TruncRelay(string? s, int n = 160)
+        => string.IsNullOrEmpty(s) ? "" : (s.Length <= n ? s : s.Substring(0, n) + "…");
 
     static string JsonPair(string id, string json)
         => "{\"id\":" + id + ",\"result\":" + json + "}";

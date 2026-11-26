@@ -9,10 +9,70 @@
  */
 (function () {
   if (window.HomeDeck) return;
-  // Top frame only (audit H1): subframes get no bridge. The equality
-  // check itself is allowed cross-origin; sandboxed frames without
-  // top access fall through the catch.
-  try { if (window.self !== window.top) return; } catch (e) { return; }
+  // Top frame only for DIRECT native access (audit H1). Subframes get
+  // the relay client below instead: requests go to the top frame's
+  // listener, which stamps the nav token this frame never sees.
+  var __hdTop = false;
+  try { __hdTop = window.self === window.top; } catch (e) {}
+  if (!__hdTop) {
+    // Iframe mode (audit relay): no direct native access, no token.
+    // Requests post to the top frame; the browser stamps the sender
+    // origin (unspoofable) and native keys grants by it. Replies match
+    // by id; only the top frame can answer (it holds the token).
+    var iid = 1, ipending = {};
+    window.addEventListener("message", function (e) {
+      try {
+        var m = e && e.data;
+        if (!m || typeof m !== "object" || m.hd !== "relay-ok") return;
+        var cb = ipending[m.id];
+        if (!cb) return;
+        delete ipending[m.id];
+        cb(m.result);
+      } catch (err) {}
+    });
+    function irelay(name, args) {
+      return new Promise(function (resolve) {
+        var id = iid++;
+        ipending[id] = resolve;
+        try { window.top.postMessage({ hd: "relay", id: id, method: name, args: args || [] }, "*"); }
+        catch (e) { delete ipending[id]; resolve({ ok: false, error: String((e && e.message) || e) }); return; }
+        setTimeout(function () { if (ipending[id]) { delete ipending[id]; resolve({ ok: false, error: "timeout" }); } }, 30000);
+      });
+    }
+    window.HomeDeck = {
+      version: "hd/1",
+      getBattery: () => irelay("getBattery", [pgHost()]),
+      getNetwork: () => irelay("getNetwork", [pgHost()]),
+      getDevice: () => irelay("getDevice", [pgHost()]),
+      vibrate: (ms) => irelay("vibrate", [pgHost(), ms | 0]),
+      bleScan: (seconds) => irelay("bleScan", [pgHost(), Math.max(1, Math.min(30, seconds | 0 || 8))]),
+      getNotifications: () => irelay("getNotifications", [pgHost()]),
+      notificationAccess: () => irelay("notificationAccess"),
+      openNotificationSettings: () => irelay("openNotificationSettings"),
+      getBrightness: () => irelay("getBrightness", [pgHost()]),
+      setBrightness: (level) => irelay("setBrightness", [pgHost(), +level]),
+      openWifiSettings: () => irelay("openWifiSettings"),
+      openBluetoothSettings: () => irelay("openBluetoothSettings"),
+      fileRoot: () => irelay("fileRoot", [pgHost()]),
+      listDir: (path) => irelay("listDir", [pgHost(), path || ""]),
+      fileInfo: (path) => irelay("fileInfo", [pgHost(), path || ""]),
+      readFile: (path) => irelay("readFile", [pgHost(), path || ""]),
+      writeFile: (path, base64) => irelay("writeFile", [pgHost(), path || "", base64 || ""]),
+      deleteFile: (path) => irelay("deleteFile", [pgHost(), path || ""]),
+      mkdir: (path) => irelay("mkdir", [pgHost(), path || ""]),
+      pickApps: () => irelay("pickApps", [pgHost()]),
+      openApp: (id) => irelay("openApp", [pgHost(), id || ""]),
+      pickedApps: () => irelay("pickedApps", [pgHost()]),
+      wifiScan: () => irelay("wifiScan"),
+      bluetoothDevices: (inquiry) => irelay("bluetoothDevices", inquiry ? 1 : 0),
+      shareText: (text, title) => irelay("shareText", text || "", title || ""),
+      clipboardWrite: (text) => irelay("clipboardWrite", [pgHost(), text || ""]),
+      clipboardRead: () => irelay("clipboardRead", [pgHost()]),
+      notify: (title, body) => irelay("notify", [pgHost(), title || "", body || ""])
+    };
+    window.dispatchEvent(new Event("homedeck:ready"));
+    return;
+  }
 
   var nextId = 1;
   var pending = {};
@@ -184,6 +244,49 @@
   };
 
   window.dispatchEvent(new Event("homedeck:ready"));
+
+  // Relay for subframes (audit relay): the iframe client above posts
+  // here. isTrusted + a real source window are required — page script
+  // (including top-frame script) cannot forge these, so event.origin
+  // is browser-stamped and safe as the grant identity. The nav token
+  // is stamped here from this closure; frames never see it. Replies
+  // go back to the sender only (targetOrigin = its origin).
+  window.addEventListener("message", function (e) {
+    try {
+      if (!e || e.isTrusted !== true) return;
+      if (!e.source || e.source === window) return;
+      var m = e.data;
+      if (!m || typeof m !== "object" || m.hd !== "relay") return;
+      if (typeof m.method !== "string" || !m.method || m.method === "relay") return;
+      var frameId = m.id, src = e.source, org = e.origin || "";
+      withToken("relay", [], function (tok) {
+        var rid = nextId++;
+        pending[rid] = function (result) {
+          try { src.postMessage({ hd: "relay-ok", id: frameId, result: result }, (org && org !== "null") ? org : "*"); }
+          catch (err) {}
+        };
+        var payload = "[]";
+        try { payload = JSON.stringify(m.args || []); } catch (err) {}
+        var n = getNative();
+        if (!n) {
+          enqueueCallInner("relay", [tok, org, m.method, payload]).then(function (r) {
+            var cb = pending[rid]; delete pending[rid]; if (cb) cb(r);
+          });
+          return;
+        }
+        try {
+          if (!n.p.relay) { var cb2 = pending[rid]; delete pending[rid]; if (cb2) cb2({ ok: false, error: "no-method: relay" }); return; }
+          if (n.sync) { n.p.relay(rid, tok, org, m.method, payload); return; }
+          try {
+            var pi = n.p.relay(rid, tok, org, m.method, payload);
+            if (pi && typeof pi.then === "function") pi.then(null, function (er) {
+              var cb3 = pending[rid]; if (cb3) { delete pending[rid]; cb3({ ok: false, error: String((er && er.message) || er) }); }
+            });
+          } catch (err) { var cb4 = pending[rid]; delete pending[rid]; if (cb4) cb4({ ok: false, error: String((err && err.message) || err) }); }
+        } catch (err) { var cb5 = pending[rid]; delete pending[rid]; if (cb5) cb5({ ok: false, error: String((err && err.message) || err) }); }
+      });
+    } catch (err) {}
+  });
 })();
 
 /* Poll-transport outbox (no native proxy — e.g. Windows file://): calls

@@ -51,6 +51,13 @@ class HomeDeckJsBridge : Java.Lang.Object
 
     string DenyTokenSync() => "{\"ok\":false,\"error\":\"bad-token\"}";
 
+    /// <summary>Relay identity (audit relay): while set, Guard/SiteKey
+    /// use this browser-stamped frame origin instead of any page-supplied
+    /// host AND skip the native top-host override. Only the relay entry
+    /// sets it, only with a valid nav token, only from an isTrusted
+    /// frame message. AsyncLocal keeps concurrent calls isolated.</summary>
+    readonly System.Threading.AsyncLocal<string?> _relayHost = new();
+
     public HomeDeckJsBridge(ShellWebView view, AdBlockService ads, Action? onCancel = null)
     {
         _view = new WeakReference<ShellWebView>(view);
@@ -89,11 +96,37 @@ class HomeDeckJsBridge : Java.Lang.Object
         catch { return null; }
     }
 
-    /// <summary>File gate with the native-observed caller URL. Never throws.</summary>
+    /// <summary>File gate with the native-observed caller URL. Relayed
+    /// calls use the browser-stamped frame origin instead (top override
+    /// skipped). Never throws.</summary>
     async Task<bool> GuardAsync(string? host, string op)
     {
-        try { return await HdFileGuard.EnsureAccessAsync(host, op, await CallerUrlAsync()); }
+        try
+        {
+            var rh = _relayHost.Value;
+            if (rh != null) return await HdFileGuard.EnsureAccessAsync(rh, op, null);
+            return await HdFileGuard.EnsureAccessAsync(host, op, await CallerUrlAsync());
+        }
         catch { return false; }
+    }
+
+    /// <summary>Relay-aware site identity (see _relayHost). Never throws.</summary>
+    async Task<(string key, string? hash)> SiteKeyForAsync(string? host)
+    {
+        try
+        {
+            var rh = _relayHost.Value;
+            if (rh != null) { var k = HdFileGuard.SiteKey(rh, null, out var h2, out _); return (k, h2); }
+            var key = HdFileGuard.SiteKey(host, await CallerUrlAsync(), out var hash, out _);
+            return (key, hash);
+        }
+        catch { return (host ?? "", null); }
+    }
+
+    /// <summary>Relay-aware host (see _relayHost). Never throws.</summary>
+    string HostFor(string? host)
+    {
+        try { return _relayHost.Value ?? host ?? ""; } catch { return host ?? ""; }
     }
 
     /// <summary>User-picked app set: native sheet, site learns picked IDs
@@ -110,7 +143,7 @@ class HomeDeckJsBridge : Java.Lang.Object
                 var sheet = hh?.AppPickSheet;
                 if (sheet == null) { Resolve(id, "{\"ok\":false,\"error\":\"no-sheet\"}"); return; }
                 string json;
-                try { json = await sheet(host, await CallerUrlAsync()) ?? "{\"ok\":false,\"error\":\"cancelled\"}"; }
+                try { json = await sheet(HostFor(host), _relayHost.Value != null ? null : await CallerUrlAsync()) ?? "{\"ok\":false,\"error\":\"cancelled\"}"; }
                 catch (Exception e) { json = "{\"ok\":false,\"error\":" + JsonQuote(e.Message) + "}"; }
                 Resolve(id, json);
             }
@@ -126,7 +159,7 @@ class HomeDeckJsBridge : Java.Lang.Object
             try
             {
                 if (!TokenOk(tok)) { DenyToken(id); return; }
-                var key = HdFileGuard.SiteKey(host, await CallerUrlAsync(), out var hash, out _);
+                var (key, hash) = await SiteKeyForAsync(host);
                 appId = (appId ?? "").Trim();
                 if (!HdFileGuard.IsAppPicked(key, hash, appId))
                 { Resolve(id, "{\"ok\":false,\"error\":\"denied\"}"); return; }
@@ -145,8 +178,8 @@ class HomeDeckJsBridge : Java.Lang.Object
             try
             {
                 if (!TokenOk(tok)) { DenyToken(id); return; }
-                var key = HdFileGuard.SiteKey(host, await CallerUrlAsync(), out var hash, out _);
-                Resolve(id, AppInventory.PickedAppsJson(key, hash));
+                var (key2, hash2) = await SiteKeyForAsync(host);
+                Resolve(id, AppInventory.PickedAppsJson(key2, hash2));
             }
             catch (Exception e) { Resolve(id, "{\"ok\":false,\"error\":" + JsonQuote(e.Message) + "}"); }
         });
@@ -227,7 +260,7 @@ class HomeDeckJsBridge : Java.Lang.Object
     [Android.Webkit.JavascriptInterface, Java.Interop.Export("getRemoveSelectors")]
     public string GetRemoveSelectors(string host)
     {
-        try { return _ads.GetRemoveSelectorsJson(host); } catch { return "[]"; }
+        try { return _ads.GetRemoveSelectorsJson(HostFor(host)); } catch { return "[]"; }
     }
 
     [Android.Webkit.JavascriptInterface, Java.Interop.Export("shareText")]
@@ -664,4 +697,107 @@ class HomeDeckJsBridge : Java.Lang.Object
             }
             catch (Exception e) { Resolve(id, "{\"ok\":false,\"error\":" + JsonQuote(e.Message) + "}"); }
         });
+
+    /// <summary>Subframe relay (audit relay): invoked ONLY by the top
+    /// frame's shell.js listener (isTrusted frame message) with the nav
+    /// token this closure holds. origin is browser-stamped and becomes
+    /// the grant identity for this call (top-host override skipped via
+    /// _relayHost); method allowlist excludes relay itself. Answers via
+    /// the method's own Resolve under the same id. Never throws.</summary>
+    [Android.Webkit.JavascriptInterface, Java.Interop.Export("relay")]
+    public void Relay(string id, string? tok, string? origin, string? method, string? argsJson)
+        => Task.Run(async () =>
+        {
+            try
+            {
+                if (!TokenOk(tok)) { DenyToken(id); return; }
+                if (string.IsNullOrWhiteSpace(method) || method.Equals("relay", StringComparison.OrdinalIgnoreCase))
+                { Resolve(id, "{\"ok\":false,\"error\":\"bad-method\"}"); return; }
+                System.Reflection.MethodInfo? mi = null;
+                try { mi = typeof(HomeDeckJsBridge).GetMethod(method, System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.IgnoreCase); }
+                catch { }
+                if (mi == null) { Resolve(id, "{\"ok\":false,\"error\":" + JsonQuote("no-method: " + method) + "}"); return; }
+                var ps = mi.GetParameters();
+                bool noArgs = ps.Length == 0;
+                bool syncString = mi.ReturnType == typeof(string);
+                bool asyncVoid = mi.ReturnType == typeof(void) && ps.Length >= 2 && ps[0].Name == "id" && ps[0].ParameterType == typeof(string)
+                    && ps[1].Name == "tok" && ps[1].ParameterType == typeof(string);
+                if (!noArgs && !asyncVoid && !(syncString && ps.Length >= 1 && ps[0].Name == "tok" && ps[0].ParameterType == typeof(string)))
+                { Resolve(id, "{\"ok\":false,\"error\":\"bad-signature\"}"); return; }
+                string rhost;
+                try
+                {
+                    if (string.IsNullOrEmpty(origin) || origin == "null") rhost = "";
+                    else rhost = new Uri(origin).Host?.Trim().ToLowerInvariant() ?? "";
+                }
+                catch { rhost = ""; }
+                System.Text.Json.JsonElement[] rargs;
+                try
+                {
+                    using var doc = System.Text.Json.JsonDocument.Parse(string.IsNullOrEmpty(argsJson) ? "[]" : argsJson);
+                    rargs = doc.RootElement.ValueKind == System.Text.Json.JsonValueKind.Array
+                        ? doc.RootElement.EnumerateArray().ToArray() : Array.Empty<System.Text.Json.JsonElement>();
+                }
+                catch { rargs = Array.Empty<System.Text.Json.JsonElement>(); }
+                _relayHost.Value = rhost;
+                try
+                {
+                    if (noArgs) { mi.Invoke(this, null); Resolve(id, "{\"ok\":true}"); return; }
+                    if (syncString)
+                    {
+                        var margs = new object?[ps.Length];
+                        margs[0] = tok;
+                        for (int i = 1; i < ps.Length; i++)
+                            margs[i] = CoerceRelay(ps[i].ParameterType, i - 1 < rargs.Length ? rargs[i - 1] : default);
+                        var r = (string?)mi.Invoke(this, margs);
+                        Resolve(id, string.IsNullOrEmpty(r) ? "{\"ok\":false,\"error\":\"empty\"}" : r);
+                        return;
+                    }
+                    var vargs = new object?[ps.Length];
+                    vargs[0] = id; vargs[1] = tok;
+                    for (int i = 2; i < ps.Length; i++)
+                        vargs[i] = CoerceRelay(ps[i].ParameterType, i - 2 < rargs.Length ? rargs[i - 2] : default);
+                    mi.Invoke(this, vargs); // async results arrive via the method's own Resolve under the same id
+                }
+                finally { _relayHost.Value = null; }
+            }
+            catch (Exception e)
+            {
+                var inner = e is System.Reflection.TargetInvocationException tie && tie.InnerException != null ? tie.InnerException : e;
+                Resolve(id, "{\"ok\":false,\"error\":" + JsonQuote(inner.Message ?? "failed") + "}");
+            }
+        });
+
+    /// <summary>JSON value to a bridge parameter type (covers the whole
+    /// surface: string/int/float/bool). Never throws.</summary>
+    static object? CoerceRelay(Type t, System.Text.Json.JsonElement el)
+    {
+        try
+        {
+            if (el.ValueKind == System.Text.Json.JsonValueKind.Undefined || el.ValueKind == System.Text.Json.JsonValueKind.Null)
+                return t == typeof(string) ? null : (t.IsValueType ? Activator.CreateInstance(t) : null);
+            if (t == typeof(string)) return el.ValueKind == System.Text.Json.JsonValueKind.String ? el.GetString() : el.ToString();
+            if (t == typeof(int))
+            {
+                if (el.ValueKind == System.Text.Json.JsonValueKind.Number && el.TryGetInt32(out var n)) return n;
+                if (el.ValueKind == System.Text.Json.JsonValueKind.String && int.TryParse(el.GetString(), out n)) return n;
+                return 0;
+            }
+            if (t == typeof(float))
+            {
+                if (el.ValueKind == System.Text.Json.JsonValueKind.Number && el.TryGetSingle(out var x)) return x;
+                if (el.ValueKind == System.Text.Json.JsonValueKind.String && float.TryParse(el.GetString(), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out x)) return x;
+                return 0f;
+            }
+            if (t == typeof(bool))
+            {
+                if (el.ValueKind == System.Text.Json.JsonValueKind.True) return true;
+                if (el.ValueKind == System.Text.Json.JsonValueKind.False) return false;
+                if (el.ValueKind == System.Text.Json.JsonValueKind.String && bool.TryParse(el.GetString(), out var b)) return b;
+                return false;
+            }
+        }
+        catch { }
+        try { return t.IsValueType ? Activator.CreateInstance(t) : null; } catch { return null; }
+    }
 }
