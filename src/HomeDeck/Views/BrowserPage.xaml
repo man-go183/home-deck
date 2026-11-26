@@ -82,7 +82,7 @@
       <Border x:Name="Drop" IsVisible="false"
               BackgroundColor="#000000" Stroke="#3A342D"
               HorizontalOptions="Start" VerticalOptions="Start"
-              Margin="48,8,0,0" Padding="6" MinimumWidthRequest="220">
+              Margin="48,8,0,0" Padding="6" MinimumWidthRequest="220" MaximumWidthRequest="360">
         <Border.StrokeShape>
           <RoundRectangle CornerRadius="14" />
         </Border.StrokeShape>

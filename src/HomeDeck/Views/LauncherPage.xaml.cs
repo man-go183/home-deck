@@ -221,7 +221,8 @@ public partial class LauncherPage : ContentPage
             try
             {
                 var slot = HdFileGuard.HomepagePath(p.Id);
-                fileStatus.Text = System.IO.File.Exists(slot) ? System.IO.Path.GetFileName(slot) : "no file yet";
+                fileStatus.Text = !System.IO.File.Exists(slot) ? "no file yet"
+                    : p.HomeFileName.Length > 0 ? p.HomeFileName : System.IO.Path.GetFileName(slot);
             }
             catch { fileStatus.Text = "no file yet"; }
         }
@@ -259,6 +260,7 @@ public partial class LauncherPage : ContentPage
                 if (System.IO.File.Exists(slot) && !await DisplayAlertAsync("Replace?", "This profile already has a homepage file. Import the new one over it?", "Replace", "Keep")) return;
                 System.IO.Directory.CreateDirectory(System.IO.Path.GetDirectoryName(slot) ?? "");
                 System.IO.File.Copy(src, slot, true);
+                p.HomeFileName = System.IO.Path.GetFileName(src);
                 useLocal = true;
                 p.UseLocal = true;
                 _store.SaveProfiles();
@@ -389,7 +391,7 @@ public partial class LauncherPage : ContentPage
         }
     }
 
-    /// <summary>Front-face subtitle: the slot file name for File-mode
+    /// <summary>Front-face subtitle: the imported file name for File-mode
     /// profiles ("no file yet" when the slot is empty), else the URL's page id.</summary>
     static string CardSubtitle(Profile p)
     {
@@ -397,7 +399,8 @@ public partial class LauncherPage : ContentPage
         try
         {
             var slot = HdFileGuard.HomepagePath(p.Id);
-            return System.IO.File.Exists(slot) ? System.IO.Path.GetFileName(slot) : "no file yet";
+            if (!System.IO.File.Exists(slot)) return "no file yet";
+            return p.HomeFileName.Length > 0 ? p.HomeFileName : System.IO.Path.GetFileName(slot);
         }
         catch { return "no file yet"; }
     }

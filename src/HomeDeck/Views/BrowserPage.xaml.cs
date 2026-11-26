@@ -48,6 +48,14 @@ public partial class BrowserPage : ContentPage
         _store = store;
         _ads = ads;
         _ads.OnPickerReported = OnPickerReported;
+        // Friendly homepage-slot titles ("ogname · profile"): slot files are
+        // named by profile id (a Guid), so resolve back to the imported file
+        // name + profile name for the settings displays.
+        HdFileGuard.HomepageTitleFor = safe =>
+            _store.Profiles
+                .Where(p => HomepageSafeId(p.Id) == safe)
+                .Select(p => p.HomeFileName.Length > 0 ? $"{p.HomeFileName} · {p.Name}" : p.Name)
+                .FirstOrDefault();
         Web.HandlerChanged += (_, _) =>
         {
             // Window-level Esc (fires even with focus buried in an iframe).
@@ -507,34 +515,36 @@ public partial class BrowserPage : ContentPage
         foreach (var p in others)
         {
             var target = p;
-            var row = new HorizontalStackLayout
+            // Grid (not a horizontal stack): the star column constrains the
+            // name label, so long names truncate instead of stretching the panel.
+            var row = new Grid
             {
-                Spacing = 10,
+                ColumnDefinitions = new ColumnDefinitionCollection { new ColumnDefinition(GridLength.Auto), new ColumnDefinition(GridLength.Star) },
+                ColumnSpacing = 10,
                 Padding = new Thickness(10, 8),
-                Children =
-                {
-                    AvatarView.Build(p, 26),
-                    new Label
-                    {
-                        Text = p.Name,
-                        FontSize = 13,
-                        FontAttributes = FontAttributes.Bold,
-                        TextColor = Colors.White,
-                        VerticalOptions = LayoutOptions.Center,
-                    },
-                },
             };
+            row.Add(AvatarView.Build(p, 26), 0, 0);
+            row.Add(new Label
+            {
+                Text = p.Name,
+                FontSize = 13,
+                FontAttributes = FontAttributes.Bold,
+                TextColor = Colors.White,
+                VerticalOptions = LayoutOptions.Center,
+                LineBreakMode = LineBreakMode.TailTruncation,
+                MaxLines = 1,
+            }, 1, 0);
             AddRowTap(row, () => { Drop.IsVisible = false; BindProfile(target); });
             rows.Children.Add(row);
         }
         DropList.Children.Add(new ScrollView { Content = rows, MaximumHeightRequest = 180 });
-        DropList.Children.Add(MenuButton("Manage profiles\u2026", async () => await Navigation.PopAsync()));
+        DropList.Children.Add(MenuRow("Manage profiles…", async () => await Navigation.PopAsync()));
         DropList.Children.Add(MenuDivider());
 
         if (_profile != null)
         {
             var p = _profile;
-            DropList.Children.Add(MenuButton("Open in browser  \u2197", async () =>
+            DropList.Children.Add(MenuRow("Open in browser  ↗", async () =>
             {
                 Drop.IsVisible = false;
                 try { await Launcher.OpenAsync(TargetUrl(p)); } catch { }
@@ -563,10 +573,10 @@ public partial class BrowserPage : ContentPage
             DropList.Children.Add(brow);
             DropList.Children.Add(MenuDivider());
 
-            DropList.Children.Add(MenuButton("Hide element\u2026", async () => await ArmPickerAsync()));
+            DropList.Children.Add(MenuRow("Hide element…", async () => await ArmPickerAsync()));
             DropList.Children.Add(MenuDivider());
 
-            DropList.Children.Add(MenuButton("Advanced settings\u2026", async () => { Drop.IsVisible = false; OpenAdsPanel(); await Task.CompletedTask; }));
+            DropList.Children.Add(MenuRow("Advanced settings…", async () => { Drop.IsVisible = false; OpenAdsPanel(); await Task.CompletedTask; }));
         }
     }
 
@@ -1049,7 +1059,7 @@ public partial class BrowserPage : ContentPage
         var texts = new VerticalStackLayout { Spacing = 0, VerticalOptions = LayoutOptions.Center, HorizontalOptions = LayoutOptions.StartAndExpand };
         texts.Children.Add(new Label { Text = perm.Title, TextColor = Colors.White, FontSize = 13 });
         texts.Children.Add(new Label { Text = $"{perm.Sub} \u00b7 {n} site{(n == 1 ? "" : "s")}", FontSize = 11, TextColor = dim });
-        var chev = new Label { Text = open ? "\u2304" : "\u203a", FontSize = 16, TextColor = dim, VerticalOptions = LayoutOptions.Center, Padding = new Thickness(12, 2) };
+        var chev = Chev(open, dim);
         var row = new HorizontalStackLayout { Spacing = 10, Padding = new Thickness(10, 6) };
         row.Children.Add(texts);
         row.Children.Add(chev);
@@ -1095,8 +1105,8 @@ public partial class BrowserPage : ContentPage
             if (go) { HdFileGuard.DeletePermEntry(s.SiteKey, permId); RebuildAdsPanel(); }
         };
         var row = new HorizontalStackLayout { Spacing = 10, Padding = new Thickness(10, 6) };
-        row.Children.Add(texts);
         row.Children.Add(cb);
+        row.Children.Add(texts);
         row.Children.Add(rm);
         AddHoverBg(row);
         return row;
@@ -1115,7 +1125,7 @@ public partial class BrowserPage : ContentPage
             var texts = new VerticalStackLayout { Spacing = 0, VerticalOptions = LayoutOptions.Center, HorizontalOptions = LayoutOptions.StartAndExpand };
             texts.Children.Add(new Label { Text = a.Name, TextColor = Colors.White, FontSize = 13 });
             texts.Children.Add(new Label { Text = $"{sites.Count} site{(sites.Count == 1 ? "" : "s")}{runMark}", FontSize = 11, TextColor = dim });
-            var chev = new Label { Text = open ? "\u2304" : "\u203a", FontSize = 16, TextColor = dim, VerticalOptions = LayoutOptions.Center, Padding = new Thickness(12, 2) };
+            var chev = Chev(open, dim);
             var row = new HorizontalStackLayout { Spacing = 10, Padding = new Thickness(10, 6) };
             row.Children.Add(texts);
             row.Children.Add(chev);
@@ -1210,8 +1220,8 @@ public partial class BrowserPage : ContentPage
             if (go) { HdFileGuard.RemoveAppPick(s.SiteKey, appId); RebuildAdsPanel(); }
         };
         var row = new HorizontalStackLayout { Spacing = 10, Padding = new Thickness(10, 6) };
-        row.Children.Add(texts);
         row.Children.Add(cb);
+        row.Children.Add(texts);
         row.Children.Add(rm);
         AddHoverBg(row);
         return row;
@@ -1358,24 +1368,47 @@ public partial class BrowserPage : ContentPage
         RebuildAdsPanel();
     }
 
-    /// <summary>De-boxed menu button (native button borders show through on
-    /// Windows, so kill them explicitly). Slim mock-style padding.</summary>
-    static Button MenuButton(string text, Func<Task> onTap)
+    /// <summary>Sanitized profile id, mirroring HdFileGuard.HomepagePath
+    /// (alphanumerics only, empty becomes "home").</summary>
+    static string HomepageSafeId(string? id)
     {
-        var b = new Button
+        var s = new string(((id ?? "home").Where(char.IsLetterOrDigit)).ToArray());
+        return s.Length > 0 ? s : "home";
+    }
+
+    /// <summary>Left-aligned menu row (menu Buttons center their text on
+    /// Windows; labels keep the panel uniformly left-aligned).</summary>
+    static Label MenuRow(string text, Func<Task> onTap)
+    {
+        var l = new Label
         {
             Text = text,
             FontSize = 13,
-            Padding = new Thickness(10, 8),
-            BorderWidth = 0,
-            BackgroundColor = Colors.Transparent,
             TextColor = Colors.White,
+            Padding = new Thickness(10, 8),
             HorizontalOptions = LayoutOptions.Fill,
         };
-        b.Clicked += async (_, _) => await onTap();
-        AddHoverBg(b);
-        return b;
+        AddRowTap(l, () => { var _ = onTap(); });
+        return l;
     }
+
+    /// <summary>Accordion chevron drawn as vector (bundled in code, so a
+    /// missing system glyph can never tofu-box). Down = collapsed.</summary>
+    static Microsoft.Maui.Controls.Shapes.Path Chev(bool open, Color c) => new()
+    {
+        Data = (Microsoft.Maui.Controls.Shapes.Geometry)new PathGeometryConverter().ConvertFromInvariantString(open ? "M2 8l4-4 4 4" : "M2 4l4 4 4-4"),
+        Stroke = new SolidColorBrush(c),
+        StrokeThickness = 1.8,
+        StrokeLineCap = PenLineCap.Round,
+        StrokeLineJoin = PenLineJoin.Round,
+        Aspect = Microsoft.Maui.Controls.Shapes.Stretch.Uniform,
+        WidthRequest = 11,
+        HeightRequest = 11,
+        HorizontalOptions = LayoutOptions.End,
+        VerticalOptions = LayoutOptions.Center,
+        Margin = new Thickness(12, 0, 2, 0),
+        InputTransparent = true,
+    };
 
     /// <summary>Mock .wsep: hairline divider between menu sections.</summary>
     static BoxView MenuDivider() => new()
@@ -1387,7 +1420,7 @@ public partial class BrowserPage : ContentPage
     };
 
     /// <summary>Borderless tap row with mock-style hover feedback.</summary>
-    static void AddRowTap(HorizontalStackLayout row, Action onTap)
+    static void AddRowTap(View row, Action onTap)
     {
         row.GestureRecognizers.Add(new TapGestureRecognizer { Command = new Command(onTap) });
         AddHoverBg(row);

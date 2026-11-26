@@ -407,13 +407,27 @@ public static class HdFileGuard
         public bool Allowed;
     }
 
+    /// <summary>Optional homepage-slot title resolver (set by the UI layer,
+    /// which owns profiles): sanitized profile id → "ogname · profile".</summary>
+    public static Func<string, string?>? HomepageTitleFor;
+
     static string DisplayFor(string siteKey)
     {
         try
         {
             if (siteKey.StartsWith("file|", StringComparison.Ordinal))
             {
-                var n = Path.GetFileName(siteKey.Substring(5));
+                var full = siteKey.Substring(5);
+                try
+                {
+                    if (string.Equals(Path.GetFileName(Path.GetDirectoryName(full)), "homepages", StringComparison.OrdinalIgnoreCase))
+                    {
+                        var t = HomepageTitleFor?.Invoke(Path.GetFileNameWithoutExtension(full));
+                        if (!string.IsNullOrEmpty(t)) return t;
+                    }
+                }
+                catch { }
+                var n = Path.GetFileName(full);
                 if (!string.IsNullOrEmpty(n)) return n;
             }
         }

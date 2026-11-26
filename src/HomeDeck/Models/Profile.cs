@@ -10,6 +10,9 @@ public sealed class Profile
     /// <summary>Homepage source: false = Url link (default), true = the
     /// profile's imported file slot (see HdFileGuard.HomepagePath).</summary>
     public bool UseLocal { get; set; } = false;
+    /// <summary>Original imported file name for the homepage slot
+    /// (display only; the slot itself is named by profile id).</summary>
+    public string HomeFileName { get; set; } = "";
     public string ColorHex { get; set; } = "#B3402E";
 
     /// <summary>Per-profile ad &amp; tracker blocking (Brave-style lists).</summary>
