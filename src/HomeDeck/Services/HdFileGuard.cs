@@ -196,6 +196,10 @@ public static class HdFileGuard
             string siteKey = isFile ? fkey : host;
             string? siteHash = isFile ? fhash : null;
             string display = isFile ? fname : host;
+            // Audit L3x: rate gate first — over-limit calls are denied with
+            // no prompt. This also kills prompt-spam from ungranted pages
+            // looping a gated call.
+            if (!RateOk(siteKey, op, StrictOp(op))) return Task.FromResult(false);
             var perm = Perms.ForOp(op);
             if (perm == null)
             {
@@ -240,6 +244,55 @@ public static class HdFileGuard
     {
         try { Preferences.Set(GrantsKey, System.Text.Json.JsonSerializer.Serialize(g, Json)); } catch { }
     }
+
+    /// <summary>Audit L3x: bridge call-rate control. Two tiers per
+    /// (site, bucket): strict (user-visible spawns + slow/expensive ops:
+    /// max 8 calls per 60s AND min 3s between) and normal (reads and
+    /// the rest: max 30 calls per 10s). Machine-speed loops die with a
+    /// denied answer; human-driven use (taps, polling every few seconds)
+    /// never notices. Site identity is native-bound (never page-supplied),
+    /// so an attacker owns exactly one bucket set and cannot flood the
+    /// table to reset it. Fail OPEN on internal error: the grant is the
+    /// security boundary, this is mitigation — never break the app over
+    /// a clock glitch. Never throws.</summary>
+    sealed class RateEntry { public DateTime Last; public readonly List<DateTime> Hits = new(); }
+    static readonly Dictionary<string, RateEntry> _rate = new(StringComparer.Ordinal);
+    static readonly object _rateLock = new();
+
+    public static bool RateOk(string siteKey, string bucket, bool strict)
+    {
+        try
+        {
+            var now = DateTime.UtcNow;
+            var key = (siteKey ?? "") + "|" + (bucket ?? "");
+            int windowSecs = strict ? 60 : 10;
+            int max = strict ? 8 : 30;
+            lock (_rateLock)
+            {
+                if (_rate.Count > 5000)
+                {
+                    var cut = now.AddSeconds(-60);
+                    foreach (var k in _rate.Where(kv => kv.Value.Hits.All(h => h < cut)).Select(kv => kv.Key).Take(1000).ToList())
+                        _rate.Remove(k);
+                    if (_rate.Count > 5000) _rate.Clear();
+                }
+                if (!_rate.TryGetValue(key, out var e)) { e = new RateEntry { Last = DateTime.MinValue }; _rate[key] = e; }
+                e.Hits.RemoveAll(h => (now - h).TotalSeconds > windowSecs);
+                if (strict && (now - e.Last).TotalSeconds < 3) return false;
+                if (e.Hits.Count >= max) return false;
+                e.Hits.Add(now);
+                e.Last = now;
+                return true;
+            }
+        }
+        catch { return true; }
+    }
+
+    /// <summary>Ops in the strict rate tier: user-visible spawns (toast/
+    /// settings/sheet floods) and slow or expensive ops (radio held on,
+    /// megabytes per call). Everything else rides the normal tier.</summary>
+    static bool StrictOp(string op) => op is "send notifications"
+        or "scan nearby devices" or "write files" or "create folders" or "delete files";
 
     static async Task<bool> PromptAsync(string who, string op, Action<Dictionary<string, FileGrant>>? remember, bool canPersist, bool degradeAlwaysToOnce, string? scope)
     {

@@ -89,6 +89,8 @@ public class HomeDeckHostObject
             try
             {
                 if (BadToken(tok)) { DenyToken(id); return; }
+                var pk = SiteKeyFor(host, out _, out _);
+                if (!HdFileGuard.RateOk(pk, "pickApps", true)) { _post(JsonPair(id, "{\"ok\":false,\"error\":\"rate-limited\"}")); return; }
                 var sheet = _appPickSheet;
                 if (sheet == null) { _post(JsonPair(id, "{\"ok\":false,\"error\":\"no-sheet\"}")); return; }
                 string json;
@@ -109,6 +111,7 @@ public class HomeDeckHostObject
             {
                 if (BadToken(tok)) { DenyToken(id); return; }
                 var key = SiteKeyFor(host, out var hash, out _);
+                if (!HdFileGuard.RateOk(key, "openApp", true)) { _post(JsonPair(id, "{\"ok\":false,\"error\":\"rate-limited\"}")); return; }
                 appId = (appId ?? "").Trim();
                 if (!HdFileGuard.IsAppPicked(key, hash, appId))
                 { _post(JsonPair(id, "{\"ok\":false,\"error\":\"denied\"}")); return; }
@@ -230,6 +233,33 @@ public class HomeDeckHostObject
             catch (Exception e) { _post(JsonPair(id, "{\"ok\":false,\"error\":" + Q(e.Message) + "}")); }
         });
 
+    /// <summary>Audit L5: parity stubs — host is threaded like every other
+    /// capability, so a future implementation inherits the gate shape. When
+    /// implementing for real, add Guard(host, "scan nearby devices") first
+    /// (like bleScan) — without it this would be ungated by construction.
+    /// Until then: honest not-implemented, no phantom prompt. Never throws.</summary>
+    public void wifiScan(string id, string? tok, string? host)
+        => Task.Run(() =>
+        {
+            try
+            {
+                if (BadToken(tok)) { DenyToken(id); return; }
+                _post(JsonPair(id, DeviceBridge.NotImplemented("wifiScan")));
+            }
+            catch (Exception e) { _post(JsonPair(id, "{\"ok\":false,\"error\":" + Q(e.Message) + "}")); }
+        });
+
+    public void bluetoothDevices(string id, string? tok, string? host, int _)
+        => Task.Run(() =>
+        {
+            try
+            {
+                if (BadToken(tok)) { DenyToken(id); return; }
+                _post(JsonPair(id, DeviceBridge.NotImplemented("bluetoothDevices")));
+            }
+            catch (Exception e) { _post(JsonPair(id, "{\"ok\":false,\"error\":" + Q(e.Message) + "}")); }
+        });
+
     /// <summary>Read access to toasts via UserNotificationListener. First
     /// call prompts the user (RequestAccessAsync, UI thread); the grant
     /// lives in Settings → Privacy → Notifications.</summary>
@@ -317,6 +347,10 @@ public class HomeDeckHostObject
             try
             {
                 if (BadToken(tok)) { DenyToken(id); return; }
+                // Audit L3x: settings deep-links have no host param — identity
+                // comes from the native-observed top URL (relay-aware).
+                var sk = HdFileGuard.SiteKey(HostFor(""), _relayHost.Value != null ? null : _source?.Invoke(), out _, out _);
+                if (!HdFileGuard.RateOk(sk, "openSettings", true)) { _post(JsonPair(id, "{\"ok\":false,\"error\":\"rate-limited\"}")); return; }
                 System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
                 {
                     FileName = uri,
@@ -545,6 +579,10 @@ public class HomeDeckHostObject
         => Task.Run(async () =>
         {
             try { if (BadToken(tok)) { DenyToken(id); return; } } catch { DenyToken(id); return; }
+            // Audit L3x: shareText has no host param — identity comes from the
+            // native-observed top URL (relay-aware, like pickApps above).
+            var sk = HdFileGuard.SiteKey(HostFor(""), _relayHost.Value != null ? null : _source?.Invoke(), out _, out _);
+            if (!HdFileGuard.RateOk(sk, "shareText", true)) { _post(JsonPair(id, "{\"ok\":false,\"error\":\"rate-limited\"}")); return; }
             try { _post(JsonPair(id, await DeviceBridge.ShareTextAsync(text, title))); } catch { }
         });
 

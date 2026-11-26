@@ -1,6 +1,7 @@
 using HomeDeck.Models;
 using Microsoft.Maui.ApplicationModel;
 using Microsoft.Maui.Storage;
+using System.Text;
 using System.Text.Json;
 
 namespace HomeDeck.Services;
@@ -296,16 +297,37 @@ public sealed class AdBlockService
 
     /// <summary>Download list text. Rejects HTML responses (parked
     /// domains, captive portals and ISP hijacks serve pages for any URL —
-    /// a 404-page must never become a "filter list"). Throws on HTTP or
-    /// content errors so callers keep the stale cache.</summary>
+    /// a 404-page must never become a "filter list"). Audit L2: capped at
+    /// 10 MB — headers first (cheap reject), then a running total over the
+    /// stream. The old code buffered the whole body twice (GetAsync +
+    /// ReadAsStringAsync) with no limit, so one hostile text/plain reply
+    /// with a rule-looking line could OOM the app. Throws on HTTP,
+    /// content, or size errors so callers keep the stale cache.</summary>
+    const long MaxListBytes = 10L * 1024 * 1024;
+
     async Task<string> DownloadListAsync(string url)
     {
-        using var resp = await _http.GetAsync(url);
+        using var resp = await _http.GetAsync(url, HttpCompletionOption.ResponseHeadersRead);
         resp.EnsureSuccessStatusCode();
         var mt = resp.Content.Headers.ContentType?.MediaType;
         if (mt != null && mt.Contains("html", StringComparison.OrdinalIgnoreCase))
             throw new InvalidOperationException("HTML response, not a filter list");
-        return await resp.Content.ReadAsStringAsync();
+        var len = resp.Content.Headers.ContentLength;
+        if (len != null && len > MaxListBytes)
+            throw new InvalidOperationException("list too big");
+        using var stream = await resp.Content.ReadAsStreamAsync();
+        using var ms = new MemoryStream();
+        var buf = new byte[81920];
+        long total = 0;
+        int n;
+        while ((n = await stream.ReadAsync(buf, 0, buf.Length)) > 0)
+        {
+            total += n;
+            if (total > MaxListBytes)
+                throw new InvalidOperationException("list too big");
+            ms.Write(buf, 0, n);
+        }
+        return Encoding.UTF8.GetString(ms.ToArray());
     }
 
     /// <summary>True when text plausibly is a filter list: holds at least

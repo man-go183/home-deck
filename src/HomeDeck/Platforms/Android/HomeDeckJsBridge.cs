@@ -138,6 +138,8 @@ class HomeDeckJsBridge : Java.Lang.Object
             try
             {
                 if (!TokenOk(tok)) { DenyToken(id); return; }
+                var (pk, _) = await SiteKeyForAsync(host);
+                if (!HdFileGuard.RateOk(pk, "pickApps", true)) { Resolve(id, "{\"ok\":false,\"error\":\"rate-limited\"}"); return; }
                 ShellWebViewHandler? hh = null;
                 try { if (_view.TryGetTarget(out var v)) hh = v.Handler as ShellWebViewHandler; } catch { }
                 var sheet = hh?.AppPickSheet;
@@ -160,6 +162,7 @@ class HomeDeckJsBridge : Java.Lang.Object
             {
                 if (!TokenOk(tok)) { DenyToken(id); return; }
                 var (key, hash) = await SiteKeyForAsync(host);
+                if (!HdFileGuard.RateOk(key, "openApp", true)) { Resolve(id, "{\"ok\":false,\"error\":\"rate-limited\"}"); return; }
                 appId = (appId ?? "").Trim();
                 if (!HdFileGuard.IsAppPicked(key, hash, appId))
                 { Resolve(id, "{\"ok\":false,\"error\":\"denied\"}"); return; }
@@ -268,6 +271,10 @@ class HomeDeckJsBridge : Java.Lang.Object
         => Task.Run(async () =>
         {
             try { if (!TokenOk(tok)) { DenyToken(id); return; } } catch { DenyToken(id); return; }
+            // Audit L3x: shareText has no host param — identity comes from the
+            // native-observed top URL (relay-aware, like PickApps above).
+            var sk = HdFileGuard.SiteKey(HostFor(""), _relayHost.Value != null ? null : await CallerUrlAsync(), out _, out _);
+            if (!HdFileGuard.RateOk(sk, "shareText", true)) { Resolve(id, "{\"ok\":false,\"error\":\"rate-limited\"}"); return; }
             try { Resolve(id, await DeviceBridge.ShareTextAsync(text, title)); } catch { }
         });
 
@@ -393,6 +400,36 @@ class HomeDeckJsBridge : Java.Lang.Object
             catch (Exception e) { Resolve(id, "{\"ok\":false,\"error\":" + JsonQuote(e.Message) + "}"); }
         });
 
+    /// <summary>Audit L5: parity stubs — host is threaded like every other
+    /// capability, so a future implementation inherits the gate shape. When
+    /// implementing for real, add GuardAsync(host, "scan nearby devices")
+    /// first (like BleScan) — without it this would be ungated by
+    /// construction. Until then: honest not-implemented, no phantom
+    /// prompt. Never throws.</summary>
+    [Android.Webkit.JavascriptInterface, Java.Interop.Export("wifiScan")]
+    public void WifiScan(string id, string? tok, string? host)
+        => Task.Run(() =>
+        {
+            try
+            {
+                if (!TokenOk(tok)) { DenyToken(id); return; }
+                Resolve(id, DeviceBridge.NotImplemented("wifiScan"));
+            }
+            catch (Exception e) { Resolve(id, "{\"ok\":false,\"error\":" + JsonQuote(e.Message) + "}"); }
+        });
+
+    [Android.Webkit.JavascriptInterface, Java.Interop.Export("bluetoothDevices")]
+    public void BluetoothDevices(string id, string? tok, string? host, int inquiry)
+        => Task.Run(() =>
+        {
+            try
+            {
+                if (!TokenOk(tok)) { DenyToken(id); return; }
+                Resolve(id, DeviceBridge.NotImplemented("bluetoothDevices"));
+            }
+            catch (Exception e) { Resolve(id, "{\"ok\":false,\"error\":" + JsonQuote(e.Message) + "}"); }
+        });
+
     [Android.Webkit.JavascriptInterface, Java.Interop.Export("notificationAccess")]
     public string NotificationAccess(string? tok)
     {
@@ -408,11 +445,13 @@ class HomeDeckJsBridge : Java.Lang.Object
 
     [Android.Webkit.JavascriptInterface, Java.Interop.Export("openNotificationSettings")]
     public void OpenNotificationSettings(string id, string? tok)
-        => Task.Run(() =>
+        => Task.Run(async () =>
         {
             try
             {
                 if (!TokenOk(tok)) { DenyToken(id); return; }
+                var sk = HdFileGuard.SiteKey(HostFor(""), _relayHost.Value != null ? null : await CallerUrlAsync(), out _, out _);
+                if (!HdFileGuard.RateOk(sk, "openSettings", true)) { Resolve(id, "{\"ok\":false,\"error\":\"rate-limited\"}"); return; }
                 var activity = Platform.CurrentActivity;
                 if (activity == null) { Resolve(id, "{\"ok\":false,\"error\":\"no-activity\"}"); return; }
                 var intent = new Android.Content.Intent(Android.Provider.Settings.ActionNotificationListenerSettings);
@@ -425,11 +464,13 @@ class HomeDeckJsBridge : Java.Lang.Object
 
     [Android.Webkit.JavascriptInterface, Java.Interop.Export("openWifiSettings")]
     public void OpenWifiSettings(string id, string? tok)
-        => Task.Run(() =>
+        => Task.Run(async () =>
         {
             try
             {
                 if (!TokenOk(tok)) { DenyToken(id); return; }
+                var sk = HdFileGuard.SiteKey(HostFor(""), _relayHost.Value != null ? null : await CallerUrlAsync(), out _, out _);
+                if (!HdFileGuard.RateOk(sk, "openSettings", true)) { Resolve(id, "{\"ok\":false,\"error\":\"rate-limited\"}"); return; }
                 var activity = Platform.CurrentActivity;
                 if (activity == null) { Resolve(id, "{\"ok\":false,\"error\":\"no-activity\"}"); return; }
                 var intent = new Android.Content.Intent(Android.Provider.Settings.ActionWifiSettings);
@@ -442,11 +483,13 @@ class HomeDeckJsBridge : Java.Lang.Object
 
     [Android.Webkit.JavascriptInterface, Java.Interop.Export("openBluetoothSettings")]
     public void OpenBluetoothSettings(string id, string? tok)
-        => Task.Run(() =>
+        => Task.Run(async () =>
         {
             try
             {
                 if (!TokenOk(tok)) { DenyToken(id); return; }
+                var sk = HdFileGuard.SiteKey(HostFor(""), _relayHost.Value != null ? null : await CallerUrlAsync(), out _, out _);
+                if (!HdFileGuard.RateOk(sk, "openSettings", true)) { Resolve(id, "{\"ok\":false,\"error\":\"rate-limited\"}"); return; }
                 var activity = Platform.CurrentActivity;
                 if (activity == null) { Resolve(id, "{\"ok\":false,\"error\":\"no-activity\"}"); return; }
                 var intent = new Android.Content.Intent(Android.Provider.Settings.ActionBluetoothSettings);
