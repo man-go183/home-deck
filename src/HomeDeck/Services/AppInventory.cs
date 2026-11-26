@@ -445,6 +445,7 @@ public static class AppInventory
         {
             var refs = HdFileGuard.PickedAppRefs(siteKey, siteHash);
             var flags = RunningFlags(refs.Select(a => a.Id));
+            var off = HdFileGuard.AppOffIds(siteKey, siteHash);
             return System.Text.Json.JsonSerializer.Serialize(new
             {
                 ok = true,
@@ -453,7 +454,8 @@ public static class AppInventory
                 {
                     id = a.Id,
                     name = a.Name,
-                    running = flags.TryGetValue(a.Id, out var r) && r
+                    running = flags.TryGetValue(a.Id, out var r) && r,
+                    enabled = !off.Contains(a.Id)
                 })
             });
         }

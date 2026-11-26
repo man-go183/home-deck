@@ -85,6 +85,9 @@ public static class HdFileGuard
     {
         public bool Always { get; set; }
         public string? H { get; set; }
+        /// Toggle state from Advanced settings: true = blocked-but-kept
+        /// (grant survives; calls deny silently without re-prompting).
+        public bool Off { get; set; }
     }
 
     static Dictionary<string, FileGrant> LoadGrants()
@@ -142,32 +145,66 @@ public static class HdFileGuard
         host = (host ?? "").Trim().ToLowerInvariant();
         try
         {
-            if (TryFileCaller(callerUrl, out var key, out var hash, out var name))
+            bool isFile = TryFileCaller(callerUrl, out var fkey, out var fhash, out var fname);
+            if (!isFile && host.Length == 0) return PromptAsync("This page", op, null, false, false, Perms.Scope(Perms.ForOp(op)));
+            string siteKey = isFile ? fkey : host;
+            string? siteHash = isFile ? fhash : null;
+            string display = isFile ? fname : host;
+            var perm = Perms.ForOp(op);
+            if (perm == null)
             {
-                var g = LoadGrants();
-                if (hash != null && g.TryGetValue(key, out var e) && e != null && e.Always && e.H == hash)
+                // Unknown op: legacy bundle behavior (grant keyed by site).
+                var g0 = LoadGrants();
+                if (g0.TryGetValue(siteKey, out var b0) && b0 != null && b0.Always && HashOk(siteKey, siteHash, b0))
                     return Task.FromResult(true);
-                // "Always" binds to this exact file content; an unhashable
-                // file degrades to once (nothing persistable to re-check).
-                return PromptAsync(name, op, g2 => { g2[key] = new FileGrant { Always = true, H = hash }; }, hash != null, hash == null);
+                bool persist0 = !(isFile && siteHash == null);
+                return PromptAsync(display, op, persist0 ? g2 => { g2[siteKey] = new FileGrant { Always = true, H = siteHash }; } : null, persist0, !persist0, Perms.Scope(null));
             }
-            if (host.Length == 0) return PromptAsync("This page", op, null, false, false);
-            var gh = LoadGrants();
-            if (gh.TryGetValue(host, out var eh) && eh != null && eh.Always) return Task.FromResult(true);
-            return PromptAsync(host, op, g2 => { g2[host] = new FileGrant { Always = true }; }, true, false);
+            var g = LoadGrants();
+            var key = Perms.Key(siteKey, perm);
+            if (g.TryGetValue(key, out var ex) && ex != null && ex.Always && HashOk(siteKey, siteHash, ex))
+                return Task.FromResult(!ex.Off);
+            // Legacy file-bundle migration: one grant covered both groups.
+            if (Perms.IsFileGroup(perm) && g.TryGetValue(siteKey, out var b) && b != null && b.Always && HashOk(siteKey, siteHash, b))
+            {
+                g[key] = new FileGrant { Always = true, H = b.H };
+                var sib = Perms.Key(siteKey, Perms.SiblingFile(perm));
+                if (g.TryGetValue(sib, out var so) && so != null && so.Always) g.Remove(siteKey);
+                SaveGrants(g);
+                return Task.FromResult(true);
+            }
+            bool persist = !(isFile && siteHash == null);
+            if (!persist) return PromptAsync(display, op, null, false, true, Perms.Scope(perm));
+            return PromptAsync(display, op, g2 => { g2[key] = new FileGrant { Always = true, H = siteHash }; }, true, false, Perms.Scope(perm));
         }
         catch { return Task.FromResult(false); }
     }
 
-    static async Task<bool> PromptAsync(string who, string op, Action<Dictionary<string, FileGrant>>? remember, bool canPersist, bool degradeAlwaysToOnce)
+    static bool HashOk(string siteKey, string? siteHash, FileGrant e)
+    {
+        try
+        {
+            if (!siteKey.StartsWith("file|", StringComparison.Ordinal)) return true;
+            return siteHash != null && e.H != null && e.H.Equals(siteHash, StringComparison.OrdinalIgnoreCase);
+        }
+        catch { return false; }
+    }
+
+    static void SaveGrants(Dictionary<string, FileGrant> g)
+    {
+        try { Preferences.Set(GrantsKey, System.Text.Json.JsonSerializer.Serialize(g, Json)); } catch { }
+    }
+
+    static async Task<bool> PromptAsync(string who, string op, Action<Dictionary<string, FileGrant>>? remember, bool canPersist, bool degradeAlwaysToOnce, string? scope)
     {
         try
         {
             var page = Application.Current?.Windows.FirstOrDefault()?.Page;
             if (page == null) return false;
             if (string.IsNullOrEmpty(who)) who = "This page";
+            if (string.IsNullOrEmpty(scope)) scope = "";
             var choice = await MainThread.InvokeOnMainThreadAsync(
-                () => page.DisplayActionSheetAsync($"{who} wants to {op} in your HomeDeck folder.",
+                () => page.DisplayActionSheetAsync($"{who} wants to {op}{scope}.",
                     "Deny", null, "Always allow", "Just once"));
             if (choice == "Always allow" && canPersist && remember != null)
             {
@@ -202,6 +239,8 @@ public static class HdFileGuard
     {
         public List<AppRef> Apps { get; set; } = new();
         public string? H { get; set; }
+        /// Disabled app ids (settings toggles). Blocked-but-kept, like Off.
+        public List<string> Off { get; set; } = new();
     }
 
     const string AppPicksKey = "hd.apppicks";
@@ -255,7 +294,7 @@ public static class HdFileGuard
             {
                 if (siteHash == null || s.H == null || !s.H.Equals(siteHash, StringComparison.OrdinalIgnoreCase)) return false;
             }
-            return s.Apps.Any(a => a != null && a.Id == appId);
+            return s.Apps.Any(a => a != null && a.Id == appId) && (s.Off == null || !s.Off.Contains(appId));
         }
         catch { return false; }
     }
@@ -283,7 +322,14 @@ public static class HdFileGuard
                 }
                 catch { }
             }
-            sets[siteKey] = new AppPickSet { Apps = clean, H = siteHash };
+            List<string> keep = new();
+            try
+            {
+                if (sets.TryGetValue(siteKey, out var prev) && prev?.Off != null)
+                    keep = prev.Off.Where(o => !string.IsNullOrEmpty(o) && clean.Any(x => x.Id == o)).Distinct().ToList();
+            }
+            catch { }
+            sets[siteKey] = new AppPickSet { Apps = clean, H = siteHash, Off = keep };
             SaveAppPicks(sets);
         }
         catch { }
@@ -313,6 +359,261 @@ public static class HdFileGuard
     {
         try { return PickedAppRefs(siteKey, siteHash).Select(a => a.Id).ToList(); }
         catch { return new(); }
+    }
+
+    /// Permission ids (stable, stored after "||" in grant keys).
+    public static class Perms
+    {
+        public const string FilesRead = "files-read";
+        public const string FilesEdit = "files-edit";
+        public const string Clipboard = "clipboard";
+        public const string Notifications = "notifications";
+        public const string Nearby = "nearby";
+        public const string Device = "device";
+        public static string? ForOp(string op) => op switch
+        {
+            "list files" or "read file info" or "read files" => FilesRead,
+            "write files" or "create folders" or "delete files" => FilesEdit,
+            "read the clipboard" or "write the clipboard" => Clipboard,
+            "read notifications" or "send notifications" => Notifications,
+            "scan nearby devices" => Nearby,
+            "read device info" => Device,
+            _ => null,
+        };
+        public static string Key(string siteKey, string perm) => siteKey + "||" + perm;
+        public static bool IsFileGroup(string perm) => perm == FilesRead || perm == FilesEdit;
+        public static string SiblingFile(string perm) => perm == FilesRead ? FilesEdit : FilesRead;
+        public static string Scope(string? perm) => perm switch
+        {
+            FilesRead or FilesEdit => " in your HomeDeck folder",
+            _ => "",
+        };
+        public static readonly (string Id, string Title, string Sub)[] All = new[]
+        {
+            (FilesRead, "Read files & folders", "List, view info, read contents"),
+            (FilesEdit, "Modify files & folders", "Write, create folders, delete"),
+            (Clipboard, "Clipboard", "Read and write the clipboard"),
+            (Notifications, "Notifications", "Read notifications, send notifications"),
+            (Nearby, "Nearby devices", "Bluetooth and Wi-Fi scans"),
+            (Device, "Device info", "Battery, network, device model"),
+        };
+    }
+
+    /// One site's standing for one permission (settings UI).
+    public sealed class SitePerm
+    {
+        public string SiteKey = "";
+        public string Display = "";
+        public bool Allowed;
+    }
+
+    static string DisplayFor(string siteKey)
+    {
+        try
+        {
+            if (siteKey.StartsWith("file|", StringComparison.Ordinal))
+            {
+                var n = Path.GetFileName(siteKey.Substring(5));
+                if (!string.IsNullOrEmpty(n)) return n;
+            }
+        }
+        catch { }
+        return string.IsNullOrEmpty(siteKey) ? "This page" : siteKey;
+    }
+
+    /// All sites holding permId (exact entries + legacy file bundles).
+    /// Never throws.
+    public static List<SitePerm> PermSites(string permId)
+    {
+        var list = new List<SitePerm>();
+        try
+        {
+            var g = LoadGrants();
+            var seen = new HashSet<string>(StringComparer.Ordinal);
+            string suf = "||" + permId;
+            foreach (var kv in g)
+            {
+                try
+                {
+                    if (kv.Key.EndsWith(suf, StringComparison.Ordinal))
+                    {
+                        var skey = kv.Key.Substring(0, kv.Key.Length - suf.Length);
+                        if (seen.Add(skey))
+                            list.Add(new SitePerm { SiteKey = skey, Display = DisplayFor(skey), Allowed = kv.Value != null && kv.Value.Always && !kv.Value.Off });
+                    }
+                    else if (!kv.Key.Contains("||") && Perms.IsFileGroup(permId) && kv.Value != null && kv.Value.Always && seen.Add(kv.Key))
+                    {
+                        list.Add(new SitePerm { SiteKey = kv.Key, Display = DisplayFor(kv.Key), Allowed = true });
+                    }
+                }
+                catch { }
+            }
+            list.Sort((a, b) => string.Compare(a.Display, b.Display, StringComparison.OrdinalIgnoreCase));
+        }
+        catch { }
+        return list;
+    }
+
+    public static int PermAllowedCount(string permId)
+    {
+        try { int n = 0; foreach (var x in PermSites(permId)) if (x.Allowed) n++; return n; }
+        catch { return 0; }
+    }
+
+    /// Toggle off (blocked-but-kept). Migrates file bundles first so the
+    /// sibling group keeps working. Never throws.
+    public static void SetPermOff(string siteKey, string permId, bool off)
+    {
+        try
+        {
+            if (string.IsNullOrEmpty(siteKey) || string.IsNullOrEmpty(permId)) return;
+            var g = LoadGrants();
+            var key = Perms.Key(siteKey, permId);
+            if (!g.TryGetValue(key, out var en) || en == null)
+            {
+                en = new FileGrant { Always = true };
+                if (Perms.IsFileGroup(permId) && g.TryGetValue(siteKey, out var b) && b != null && b.Always)
+                {
+                    en.H = b.H;
+                    var sib = Perms.Key(siteKey, Perms.SiblingFile(permId));
+                    if (!g.ContainsKey(sib)) g[sib] = new FileGrant { Always = true, H = b.H };
+                    g.Remove(siteKey);
+                }
+                else if (!Perms.IsFileGroup(permId)) return;
+                g[key] = en;
+            }
+            en.Off = off;
+            SaveGrants(g);
+        }
+        catch { }
+    }
+
+    /// Revoke: delete the entry (next use re-prompts). For file groups a
+    /// legacy bundle is pinned to the sibling so only this group drops.
+    /// Never throws.
+    public static void DeletePermEntry(string siteKey, string permId)
+    {
+        try
+        {
+            if (string.IsNullOrEmpty(siteKey) || string.IsNullOrEmpty(permId)) return;
+            var g = LoadGrants();
+            g.Remove(Perms.Key(siteKey, permId));
+            if (Perms.IsFileGroup(permId) && g.TryGetValue(siteKey, out var b) && b != null)
+            {
+                g[Perms.Key(siteKey, Perms.SiblingFile(permId))] = new FileGrant { Always = b.Always, H = b.H };
+                g.Remove(siteKey);
+            }
+            SaveGrants(g);
+        }
+        catch { }
+    }
+
+    /// Disabled app ids for a site (settings toggles). Never throws.
+    public static List<string> AppOffIds(string siteKey, string? siteHash)
+    {
+        try
+        {
+            var sets = LoadAppPicks();
+            if (!sets.TryGetValue(siteKey, out var s) || s == null || s.Off == null) return new();
+            if (siteKey.StartsWith("file|", StringComparison.Ordinal))
+            {
+                if (siteHash == null || s.H == null || !s.H.Equals(siteHash, StringComparison.OrdinalIgnoreCase)) return new();
+            }
+            return s.Off.Where(o => !string.IsNullOrEmpty(o)).Distinct().ToList();
+        }
+        catch { return new(); }
+    }
+
+    /// Toggle one picked app off/on (blocked-but-kept). No-op when the
+    /// set is unbound. Never throws.
+    public static void SetAppOff(string siteKey, string? siteHash, string appId, bool off, bool trusted = false)
+    {
+        try
+        {
+            if (string.IsNullOrEmpty(siteKey) || string.IsNullOrEmpty(appId)) return;
+            var sets = LoadAppPicks();
+            if (!sets.TryGetValue(siteKey, out var s) || s == null) return;
+            if (!trusted && siteKey.StartsWith("file|", StringComparison.Ordinal))
+            {
+                if (siteHash == null || s.H == null || !s.H.Equals(siteHash, StringComparison.OrdinalIgnoreCase)) return;
+            }
+            s.Off ??= new List<string>();
+            if (off) { if (!s.Off.Contains(appId)) s.Off.Add(appId); }
+            else s.Off.Remove(appId);
+            SaveAppPicks(sets);
+        }
+        catch { }
+    }
+
+    /// One picked app across sites (settings Apps section).
+    public sealed class AppSite
+    {
+        public string SiteKey = "";
+        public string Display = "";
+        public bool Enabled;
+    }
+
+    /// All distinct picked app ids with a display name (first seen).
+    /// Never throws.
+    public static List<AppRef> AllPickedApps()
+    {
+        var list = new List<AppRef>();
+        try
+        {
+            var seen = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var kv in LoadAppPicks())
+            {
+                if (kv.Value?.Apps == null) continue;
+                foreach (var a in kv.Value.Apps)
+                {
+                    if (a == null || string.IsNullOrEmpty(a.Id) || !seen.Add(a.Id)) continue;
+                    list.Add(new AppRef { Id = a.Id, Name = string.IsNullOrEmpty(a.Name) ? a.Id : a.Name });
+                }
+            }
+            list.Sort((a, b) => string.Compare(a.Name, b.Name, StringComparison.OrdinalIgnoreCase));
+        }
+        catch { }
+        return list;
+    }
+
+    /// Sites holding appId, with per-site enabled state. Never throws.
+    public static List<AppSite> AppSites(string appId)
+    {
+        var list = new List<AppSite>();
+        try
+        {
+            if (string.IsNullOrEmpty(appId)) return list;
+            foreach (var kv in LoadAppPicks())
+            {
+                try
+                {
+                    if (kv.Value?.Apps == null || !kv.Value.Apps.Any(a => a != null && a.Id == appId)) continue;
+                    bool en = kv.Value.Off == null || !kv.Value.Off.Contains(appId);
+                    list.Add(new AppSite { SiteKey = kv.Key, Display = DisplayFor(kv.Key), Enabled = en });
+                }
+                catch { }
+            }
+            list.Sort((a, b) => string.Compare(a.Display, b.Display, StringComparison.OrdinalIgnoreCase));
+        }
+        catch { }
+        return list;
+    }
+
+    /// Remove one app from one site's set (settings unpick). Drops the
+    /// site entry when the set empties. Never throws.
+    public static void RemoveAppPick(string siteKey, string appId)
+    {
+        try
+        {
+            if (string.IsNullOrEmpty(siteKey) || string.IsNullOrEmpty(appId)) return;
+            var sets = LoadAppPicks();
+            if (!sets.TryGetValue(siteKey, out var s) || s == null) return;
+            s.Apps.RemoveAll(a => a == null || a.Id == appId);
+            s.Off?.Remove(appId);
+            if (s.Apps.Count == 0) sets.Remove(siteKey);
+            SaveAppPicks(sets);
+        }
+        catch { }
     }
 
     /// <summary>App-owned homepage slot for a profile: one fixed file, so

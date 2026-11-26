@@ -28,6 +28,9 @@ public partial class BrowserPage : ContentPage
 #endif
 
     bool _transient;
+    Label? _blockSub;
+    string? _openPerm;
+    string? _openApp;
     public BrowserPage(ProfileStore store, AdBlockService ads)
     {
         InitializeComponent();
@@ -203,7 +206,7 @@ public partial class BrowserPage : ContentPage
     /// fires off the UI thread, so marshal here.</summary>
     void OnCountsChanged()
     {
-        try { MainThread.BeginInvokeOnMainThread(() => { try { if (AdsPanel.IsVisible) RebuildAdsPanel(); } catch { } }); } catch { }
+        try { MainThread.BeginInvokeOnMainThread(() => { try { if (AdsPanel.IsVisible) RebuildAdsPanel(); } catch { } try { if (Drop.IsVisible && _blockSub != null) _blockSub.Text = BlockerSub(); } catch { } }); } catch { }
     }
 
     void RemovePickerRuleAsync(string host, string selector)
@@ -487,22 +490,22 @@ public partial class BrowserPage : ContentPage
     void RebuildDrop()
     {
         DropList.Children.Clear();
+        var dim = (Color)Application.Current!.Resources["HdDim"];
         var others = _store.Profiles.Where(p => p != _profile).ToList();
+        // Profile switcher: capped at ~4 rows, then scrolls.
+        var rows = new VerticalStackLayout { Spacing = 2 };
         if (others.Count == 0)
         {
-            // Mock state with a single profile: dimmed, non-clickable row.
-            DropList.Children.Add(new Label
+            rows.Children.Add(new Label
             {
                 Text = "No other profiles",
                 FontSize = 13,
-                TextColor = (Color)Application.Current!.Resources["HdDim"],
+                TextColor = dim,
                 Padding = new Thickness(10, 8),
             });
         }
         foreach (var p in others)
         {
-            // Mock profile row: avatar + name (no ◈ prefix — the pill
-            // shield already shows state), borderless with hover feedback.
             var target = p;
             var row = new HorizontalStackLayout
             {
@@ -522,16 +525,27 @@ public partial class BrowserPage : ContentPage
                 },
             };
             AddRowTap(row, () => { Drop.IsVisible = false; BindProfile(target); });
-            DropList.Children.Add(row);
+            rows.Children.Add(row);
         }
-        DropList.Children.Add(MenuButton("Manage profiles…", async () => await Navigation.PopAsync()));
+        DropList.Children.Add(new ScrollView { Content = rows, MaximumHeightRequest = 180 });
+        DropList.Children.Add(MenuButton("Manage profiles\u2026", async () => await Navigation.PopAsync()));
         DropList.Children.Add(MenuDivider());
 
         if (_profile != null)
         {
-            var row = new HorizontalStackLayout { Spacing = 10, Padding = new Thickness(10, 8) };
-            var cb = new HdCheckBox { IsChecked = _profile.AdBlock, VerticalOptions = LayoutOptions.Center };
-            var lab = new Label { Text = "Block ads & trackers", TextColor = Colors.White, VerticalOptions = LayoutOptions.Center, HorizontalOptions = LayoutOptions.StartAndExpand };
+            var p = _profile;
+            DropList.Children.Add(MenuButton("Open in browser  \u2197", async () =>
+            {
+                Drop.IsVisible = false;
+                try { await Launcher.OpenAsync(TargetUrl(p)); } catch { }
+            }));
+            DropList.Children.Add(MenuDivider());
+
+            var cb = new HdCheckBox { IsChecked = p.AdBlock, VerticalOptions = LayoutOptions.Center };
+            var texts = new VerticalStackLayout { Spacing = 0, VerticalOptions = LayoutOptions.Center, HorizontalOptions = LayoutOptions.StartAndExpand };
+            texts.Children.Add(new Label { Text = "Block ads & trackers", TextColor = Colors.White, FontSize = 13 });
+            _blockSub = new Label { Text = BlockerSub(), FontSize = 11, TextColor = Color.FromRgba(242, 237, 232, 110) };
+            texts.Children.Add(_blockSub);
             cb.CheckedChanged += (_, on) =>
             {
                 if (_profile == null) return;
@@ -539,55 +553,31 @@ public partial class BrowserPage : ContentPage
                 Web.AdBlockEnabled = on;
                 SyncShield(_profile);
                 _store.SaveProfiles();
+                try { if (_blockSub != null) _blockSub.Text = BlockerSub(); } catch { }
             };
-            row.Children.Add(cb); row.Children.Add(lab);
-            // Split tap zones (nested taps both fire): cb + label toggle via
-            // the label's own tap below; the chevron opens the settings panel.
-            // (No row-level toggle — it would misfire into the chevron.)
-            lab.GestureRecognizers.Add(new TapGestureRecognizer
-            {
-                Command = new Command(() => cb.IsChecked = !cb.IsChecked)
-            });
-            var chev = new Label
-            {
-                Text = "›",
-                FontSize = 18,
-                TextColor = (Color)Application.Current!.Resources["HdDim"],
-                VerticalOptions = LayoutOptions.Center,
-                Padding = new Thickness(12, 2),
-            };
-            chev.GestureRecognizers.Add(new TapGestureRecognizer
-            {
-                Command = new Command(() => OpenAdsPanel())
-            });
-            row.Children.Add(chev);
-            AddHoverBg(row);
-            DropList.Children.Add(row);
-            if (_profile.AdBlock)
-            {
-                // Subtitle-style proof row: smaller + fainter than menu text.
-                DropList.Children.Add(new Label
-                {
-                    Text = $"Blocked {Web.BlockedCount} network · Hidden {Web.HiddenCount} on-page",
-                    FontSize = 11,
-                    TextColor = Color.FromRgba(242, 237, 232, 110),
-                    Padding = new Thickness(10, 0, 10, 4),
-                });
-            }
+            texts.GestureRecognizers.Add(new TapGestureRecognizer { Command = new Command(() => cb.IsChecked = !cb.IsChecked) });
+            var brow = new HorizontalStackLayout { Spacing = 10, Padding = new Thickness(10, 8) };
+            brow.Children.Add(cb);
+            brow.Children.Add(texts);
+            AddHoverBg(brow);
+            DropList.Children.Add(brow);
             DropList.Children.Add(MenuDivider());
 
-            DropList.Children.Add(MenuButton("Hide element…", async () => await ArmPickerAsync()));
+            DropList.Children.Add(MenuButton("Hide element\u2026", async () => await ArmPickerAsync()));
             DropList.Children.Add(MenuDivider());
 
-            DropList.Children.Add(MenuButton("Open in browser  ↗", async () =>
-            {
-                Drop.IsVisible = false;
-                if (_profile != null)
-                {
-                    try { await Launcher.OpenAsync(TargetUrl(_profile)); } catch { }
-                }
-            }));
+            DropList.Children.Add(MenuButton("Advanced settings\u2026", async () => { Drop.IsVisible = false; OpenAdsPanel(); await Task.CompletedTask; }));
         }
+    }
+
+    string BlockerSub()
+    {
+        try
+        {
+            if (_profile == null || !_profile.AdBlock) return "Off";
+            return $"On \u2014 Blocked {Web.BlockedCount} \u00b7 Hidden {Web.HiddenCount} on-page";
+        }
+        catch { return ""; }
     }
 
     /// <summary>Arm the element picker with a wait cursor (Windows) and an
@@ -682,11 +672,14 @@ public partial class BrowserPage : ContentPage
         var bg = (Color)Application.Current.Resources["HdBg"];
         AdsPanelBody.Children.Add(new Label
         {
-            Text = "Ad blocking",
+            Text = "Advanced settings",
             FontSize = 18,
             FontAttributes = FontAttributes.Bold,
             TextColor = Colors.White,
         });
+
+        // ---------- AD BLOCKING ----------
+        AddSection("AD BLOCKING", dim);
         var tcb = new HdCheckBox { IsChecked = p.AdBlock, VerticalOptions = LayoutOptions.Center };
         var tlab = new Label
         {
@@ -714,14 +707,14 @@ public partial class BrowserPage : ContentPage
         AdsPanelBody.Children.Add(trow);
         AdsPanelBody.Children.Add(new Label
         {
-            Text = $"Blocked {Web.BlockedCount} network · Hidden {Web.HiddenCount} on-page",
+            Text = $"Blocked {Web.BlockedCount} network \u00b7 Hidden {Web.HiddenCount} on-page",
             FontSize = 11,
             TextColor = Color.FromRgba(242, 237, 232, 110),
             Padding = new Thickness(10, 0, 10, 4),
         });
         AdsPanelBody.Children.Add(new Label
         {
-            Text = _ads.Ready ? $"Engine ready · {_ads.LoadedRuleCount:N0} rules" : "Engine not ready — blocking off",
+            Text = _ads.Ready ? $"Engine ready \u00b7 {_ads.LoadedRuleCount:N0} rules" : "Engine not ready \u2014 blocking off",
             FontSize = 11,
             TextColor = dim,
             Padding = new Thickness(10, 0, 10, 4),
@@ -735,11 +728,8 @@ public partial class BrowserPage : ContentPage
             Padding = new Thickness(10, 4, 10, 0),
         });
         var rows = new VerticalStackLayout { Spacing = 2 };
-        foreach (var s in _ads.GetListStatus())
-            rows.Children.Add(AdsListRow(s, dim));
-        // Locked list region: fixed height, own scroll. The list can grow
-        // (custom lists later) without pushing Update/cadence/Done off-panel.
-        // The outer panel scroll remains as the overflow safety net.
+        foreach (var ls in _ads.GetListStatus())
+            rows.Children.Add(AdsListRow(ls, dim));
         var listScroll = new ScrollView
         {
             Content = rows,
@@ -756,7 +746,7 @@ public partial class BrowserPage : ContentPage
         });
         var upd = new Button
         {
-            Text = _updating ? "Updating…" : "Update now",
+            Text = _updating ? "Updating\u2026" : "Update now",
             BackgroundColor = gold,
             TextColor = bg,
             CornerRadius = 10,
@@ -766,7 +756,7 @@ public partial class BrowserPage : ContentPage
         AdsPanelBody.Children.Add(upd);
         AdsPanelBody.Children.Add(new Label
         {
-            Text = "Some lists couldn't download — kept the current blocking.",
+            Text = "Some lists couldn\u2019t download \u2014 kept the current blocking.",
             FontSize = 12,
             TextColor = Color.FromArgb("#E14B32"),
             IsVisible = _lastUpdateFailed,
@@ -788,7 +778,7 @@ public partial class BrowserPage : ContentPage
         };
         var urlEntry = new Entry
         {
-            Placeholder = "https://…/list.txt",
+            Placeholder = "https://\u2026/list.txt",
             TextColor = Colors.White,
             PlaceholderColor = dim,
             FontSize = 13,
@@ -819,96 +809,6 @@ public partial class BrowserPage : ContentPage
         AdsPanelBody.Children.Add(urlEntry);
         AdsPanelBody.Children.Add(addErr);
         AdsPanelBody.Children.Add(addBtn);
-        var picks = _sessionPicks;
-        AdsPanelBody.Children.Add(new Label
-        {
-            Text = "PICKED ELEMENTS",
-            FontSize = 11,
-            TextColor = dim,
-            Padding = new Thickness(10, 8, 10, 0),
-        });
-        if (!string.IsNullOrEmpty(_ads.LastReportError))
-        {
-            AdsPanelBody.Children.Add(new Label
-            {
-                Text = "Last save failed: " + _ads.LastReportError,
-                FontSize = 12,
-                TextColor = Color.FromArgb("#E14B32"),
-                Padding = new Thickness(10, 2, 10, 0),
-            });
-        }
-        if (Web.Handler is ShellWebViewHandler hh && !string.IsNullOrEmpty(hh.BridgeInitError))
-        {
-            AdsPanelBody.Children.Add(new Label
-            {
-                Text = "Bridge: " + hh.BridgeInitError,
-                FontSize = 12,
-                TextColor = Color.FromArgb("#E14B32"),
-                Padding = new Thickness(10, 2, 10, 0),
-            });
-        }
-        if (picks.Count == 0)
-        {
-            AdsPanelBody.Children.Add(new Label
-            {
-                Text = "Nothing picked yet — Hide element… in the menu.",
-                FontSize = 11,
-                TextColor = dim,
-                Padding = new Thickness(10, 2, 10, 0),
-            });
-        }
-        else
-        {
-            foreach (var r in picks)
-            {
-                string host = r.Host, selector = r.Selector;
-                string shown = selector.Length > 80 ? selector.Substring(0, 80) + "…" : selector;
-                if (r.Mode == "remove") shown += " · removed";
-                var texts = new VerticalStackLayout
-                {
-                    Spacing = 0,
-                    VerticalOptions = LayoutOptions.Center,
-                    HorizontalOptions = LayoutOptions.StartAndExpand,
-                };
-                texts.Children.Add(new Label { Text = host, FontSize = 13, TextColor = Colors.White });
-                texts.Children.Add(new Label { Text = shown, FontSize = 11, TextColor = dim });
-                var rm = new Button
-                {
-                    Text = "✕",
-                    FontSize = 12,
-                    TextColor = dim,
-                    BackgroundColor = Colors.Transparent,
-                    BorderWidth = 0,
-                    Padding = new Thickness(8, 2),
-                    VerticalOptions = LayoutOptions.Center,
-                };
-                rm.Clicked += async (_, _) =>
-                {
-                    bool go = await DisplayAlert("Remove rule?",
-                        $"Stop hiding this on {host}? It will reappear after you reload the page.", "Remove", "Keep");
-                    if (go) RemovePickerRuleAsync(host, selector);
-                };
-                var prow = new HorizontalStackLayout { Spacing = 10, Padding = new Thickness(10, 6) };
-                prow.Children.Add(texts);
-                prow.Children.Add(rm);
-                AddHoverBg(prow);
-                AdsPanelBody.Children.Add(prow);
-            }
-        }
-        var pickBtn = new Button
-        {
-            Text = "＋ Pick an element",
-            FontSize = 13,
-            CornerRadius = 8,
-            Padding = new Thickness(14, 7),
-            BackgroundColor = Colors.Transparent,
-            TextColor = dim,
-            BorderWidth = 1,
-            BorderColor = dim,
-            Margin = new Thickness(10, 6, 10, 0),
-        };
-        pickBtn.Clicked += async (_, _) => await ArmPickerAsync();
-        AdsPanelBody.Children.Add(pickBtn);
         AdsPanelBody.Children.Add(new Label
         {
             Text = "Refresh lists",
@@ -942,6 +842,162 @@ public partial class BrowserPage : ContentPage
             crow.Children.Add(b);
         }
         AdsPanelBody.Children.Add(crow);
+
+        // ---------- HIDDEN ELEMENTS ----------
+        AddSection("HIDDEN ELEMENTS", dim);
+        var picks = _sessionPicks;
+        if (!string.IsNullOrEmpty(_ads.LastReportError))
+        {
+            AdsPanelBody.Children.Add(new Label
+            {
+                Text = "Last save failed: " + _ads.LastReportError,
+                FontSize = 12,
+                TextColor = Color.FromArgb("#E14B32"),
+                Padding = new Thickness(10, 2, 10, 0),
+            });
+        }
+        if (picks.Count == 0)
+        {
+            AdsPanelBody.Children.Add(new Label
+            {
+                Text = "Nothing picked yet \u2014 Hide element\u2026 in the menu.",
+                FontSize = 11,
+                TextColor = dim,
+                Padding = new Thickness(10, 2, 10, 0),
+            });
+        }
+        else
+        {
+            foreach (var r in picks)
+            {
+                string host = r.Host, selector = r.Selector;
+                string shown = selector.Length > 80 ? selector.Substring(0, 80) + "\u2026" : selector;
+                if (r.Mode == "remove") shown += " \u00b7 removed";
+                var texts = new VerticalStackLayout
+                {
+                    Spacing = 0,
+                    VerticalOptions = LayoutOptions.Center,
+                    HorizontalOptions = LayoutOptions.StartAndExpand,
+                };
+                texts.Children.Add(new Label { Text = host, FontSize = 13, TextColor = Colors.White });
+                texts.Children.Add(new Label { Text = shown, FontSize = 11, TextColor = dim });
+                var rm = new Button
+                {
+                    Text = "\u2715",
+                    FontSize = 12,
+                    TextColor = dim,
+                    BackgroundColor = Colors.Transparent,
+                    BorderWidth = 0,
+                    Padding = new Thickness(8, 2),
+                    VerticalOptions = LayoutOptions.Center,
+                };
+                rm.Clicked += async (_, _) =>
+                {
+                    bool go = await DisplayAlert("Remove rule?",
+                        $"Stop hiding this on {host}? It will reappear after you reload the page.", "Remove", "Keep");
+                    if (go) RemovePickerRuleAsync(host, selector);
+                };
+                var prow = new HorizontalStackLayout { Spacing = 10, Padding = new Thickness(10, 6) };
+                prow.Children.Add(texts);
+                prow.Children.Add(rm);
+                AddHoverBg(prow);
+                AdsPanelBody.Children.Add(prow);
+            }
+        }
+        var pickBtn = new Button
+        {
+            Text = "\uFF0B Pick an element",
+            FontSize = 13,
+            CornerRadius = 8,
+            Padding = new Thickness(14, 7),
+            BackgroundColor = Colors.Transparent,
+            TextColor = dim,
+            BorderWidth = 1,
+            BorderColor = dim,
+            Margin = new Thickness(10, 6, 10, 0),
+        };
+        pickBtn.Clicked += async (_, _) => await ArmPickerAsync();
+        AdsPanelBody.Children.Add(pickBtn);
+
+        // ---------- PERMISSIONS ----------
+        AddSection("PERMISSIONS", dim);
+        string curKey = CurrentSiteKey(out string? _);
+        foreach (var perm in HdFileGuard.Perms.All)
+            AddPermRow(perm, curKey, dim);
+        AdsPanelBody.Children.Add(GroupLabel("SYSTEM", dim));
+        var sysText = new Label { Text = "System notifications: \u2026", FontSize = 12, TextColor = dim, Padding = new Thickness(10, 2, 10, 0) };
+        AdsPanelBody.Children.Add(sysText);
+        var sysBtn = new Button
+        {
+            Text = "Open notification settings",
+            FontSize = 13,
+            CornerRadius = 8,
+            Padding = new Thickness(14, 7),
+            BackgroundColor = Colors.Transparent,
+            TextColor = dim,
+            BorderWidth = 1,
+            BorderColor = dim,
+            Margin = new Thickness(10, 6, 10, 0),
+        };
+        sysBtn.Clicked += async (_, _) => { try { await Web.EvaluateJavaScriptAsync("HomeDeck.openNotificationSettings()"); } catch { } };
+        AdsPanelBody.Children.Add(sysBtn);
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                var raw = await Web.EvaluateJavaScriptAsync("HomeDeck.notificationAccess()");
+                string? inner = null;
+                try
+                {
+                    using var doc = System.Text.Json.JsonDocument.Parse(raw ?? "");
+                    if (doc.RootElement.ValueKind == System.Text.Json.JsonValueKind.String)
+                        inner = doc.RootElement.GetString();
+                }
+                catch { }
+                bool on = inner != null && inner.Contains("\\"enabled\\":true");
+                MainThread.BeginInvokeOnMainThread(() =>
+                {
+                    try { sysText.Text = "System notifications: " + (on ? "on" : "off \u2014 turn on in Settings, then pages can ask"); } catch { }
+                });
+            }
+            catch { }
+        });
+
+        // ---------- BRIDGE ----------
+        AddSection("BRIDGE", dim);
+        string transport = "\u2014";
+        string? initErr = null;
+        try
+        {
+            if (Web.Handler is ShellWebViewHandler hb)
+            {
+                transport = hb.BridgeStatus();
+                initErr = hb.BridgeInitError;
+            }
+        }
+        catch { }
+        AdsPanelBody.Children.Add(new Label
+        {
+            Text = "Transport: " + transport,
+            FontSize = 12,
+            TextColor = Colors.White,
+            Padding = new Thickness(10, 2, 10, 0),
+        });
+        if (!string.IsNullOrEmpty(initErr))
+        {
+            AdsPanelBody.Children.Add(new Label
+            {
+                Text = "Bridge: " + initErr,
+                FontSize = 12,
+                TextColor = Color.FromArgb("#E14B32"),
+                Padding = new Thickness(10, 2, 10, 0),
+            });
+        }
+
+        // ---------- APPS ----------
+        AddSection("APPS", dim);
+        AddAppSection(curKey, dim);
+
         var done = new Button
         {
             Text = "Done",
@@ -951,6 +1007,214 @@ public partial class BrowserPage : ContentPage
         };
         done.Clicked += (_, _) => CloseAdsPanel();
         AdsPanelBody.Children.Add(done);
+    }
+
+    void AddSection(string text, Color dim)
+    {
+        AdsPanelBody.Children.Add(MenuDivider());
+        AdsPanelBody.Children.Add(new Label
+        {
+            Text = text,
+            FontSize = 11,
+            TextColor = dim,
+            Padding = new Thickness(10, 8, 10, 0),
+        });
+    }
+
+    Label GroupLabel(string text, Color dim) => new()
+    {
+        Text = text,
+        FontSize = 11,
+        TextColor = dim,
+        Padding = new Thickness(10, 6, 10, 0),
+    };
+
+    /// Current profile's site key (permissions + apps resolve through it).
+    string CurrentSiteKey(out string? siteHash)
+    {
+        siteHash = null;
+        try
+        {
+            string? h = (_profile != null && _profile.UseLocal) ? "local" : Web.PageHost;
+            string? u = (Web.Source as UrlWebViewSource)?.Url;
+            return HdFileGuard.SiteKey(h, u, out siteHash, out _);
+        }
+        catch { return ""; }
+    }
+
+    void AddPermRow((string Id, string Title, string Sub) perm, string curKey, Color dim)
+    {
+        int n = HdFileGuard.PermAllowedCount(perm.Id);
+        bool open = _openPerm == perm.Id;
+        var texts = new VerticalStackLayout { Spacing = 0, VerticalOptions = LayoutOptions.Center, HorizontalOptions = LayoutOptions.StartAndExpand };
+        texts.Children.Add(new Label { Text = perm.Title, TextColor = Colors.White, FontSize = 13 });
+        texts.Children.Add(new Label { Text = $"{perm.Sub} \u00b7 {n} site{(n == 1 ? "" : "s")}", FontSize = 11, TextColor = dim });
+        var chev = new Label { Text = open ? "\u2304" : "\u203a", FontSize = 16, TextColor = dim, VerticalOptions = LayoutOptions.Center, Padding = new Thickness(12, 2) };
+        var row = new HorizontalStackLayout { Spacing = 10, Padding = new Thickness(10, 6) };
+        row.Children.Add(texts);
+        row.Children.Add(chev);
+        var id = perm.Id;
+        AddRowTap(row, () => { _openPerm = open ? null : id; RebuildAdsPanel(); });
+        AdsPanelBody.Children.Add(row);
+        if (!open) return;
+        var sites = HdFileGuard.PermSites(id);
+        var box = new VerticalStackLayout { Spacing = 2 };
+        bool anyMine = curKey.Length > 0 && sites.Any(s => s.SiteKey == curKey);
+        if (anyMine) box.Children.Add(GroupLabel("THIS PROFILE", dim));
+        foreach (var s in sites.Where(s => s.SiteKey == curKey && curKey.Length > 0))
+            box.Children.Add(PermSiteRow(id, s, dim));
+        if (anyMine && sites.Any(s => s.SiteKey != curKey)) box.Children.Add(GroupLabel("OTHER SITES", dim));
+        foreach (var s in sites.Where(s => s.SiteKey != curKey || curKey.Length == 0))
+            box.Children.Add(PermSiteRow(id, s, dim));
+        if (sites.Count == 0)
+            box.Children.Add(new Label { Text = "No sites yet \u2014 first use asks.", FontSize = 12, TextColor = dim, Padding = new Thickness(10, 2, 10, 4) });
+        AdsPanelBody.Children.Add(new ScrollView { Content = box, MaximumHeightRequest = 170 });
+    }
+
+    View PermSiteRow(string permId, HdFileGuard.SitePerm s, Color dim)
+    {
+        var texts = new VerticalStackLayout { Spacing = 0, VerticalOptions = LayoutOptions.Center, HorizontalOptions = LayoutOptions.StartAndExpand };
+        texts.Children.Add(new Label { Text = s.Display, TextColor = Colors.White, FontSize = 13 });
+        texts.Children.Add(new Label { Text = s.Allowed ? "Allowed" : "Off", FontSize = 11, TextColor = s.Allowed ? dim : Color.FromArgb("#E14B32") });
+        var cb = new HdCheckBox { IsChecked = s.Allowed, VerticalOptions = LayoutOptions.Center };
+        cb.CheckedChanged += (_, on) => { HdFileGuard.SetPermOff(s.SiteKey, permId, !on); RebuildAdsPanel(); };
+        texts.GestureRecognizers.Add(new TapGestureRecognizer { Command = new Command(() => cb.IsChecked = !cb.IsChecked) });
+        var rm = new Button
+        {
+            Text = "\u2715",
+            FontSize = 12,
+            TextColor = dim,
+            BackgroundColor = Colors.Transparent,
+            BorderWidth = 0,
+            Padding = new Thickness(8, 2),
+            VerticalOptions = LayoutOptions.Center,
+        };
+        rm.Clicked += async (_, _) =>
+        {
+            bool go = await DisplayAlert("Revoke permission?", $"Forget this site\u2019s {permId} grant? Next use asks again.", "Revoke", "Keep");
+            if (go) { HdFileGuard.DeletePermEntry(s.SiteKey, permId); RebuildAdsPanel(); }
+        };
+        var row = new HorizontalStackLayout { Spacing = 10, Padding = new Thickness(10, 6) };
+        row.Children.Add(texts);
+        row.Children.Add(cb);
+        row.Children.Add(rm);
+        AddHoverBg(row);
+        return row;
+    }
+
+    void AddAppSection(string curKey, Color dim)
+    {
+        var all = HdFileGuard.AllPickedApps();
+        Dictionary<string, bool> running = new();
+        try { running = AppInventory.RunningFlags(all.Select(a => a.Id)); } catch { }
+        foreach (var a in all)
+        {
+            var sites = HdFileGuard.AppSites(a.Id);
+            bool open = _openApp == a.Id;
+            string runMark = running.TryGetValue(a.Id, out var r) && r ? " \u00b7 running" : "";
+            var texts = new VerticalStackLayout { Spacing = 0, VerticalOptions = LayoutOptions.Center, HorizontalOptions = LayoutOptions.StartAndExpand };
+            texts.Children.Add(new Label { Text = a.Name, TextColor = Colors.White, FontSize = 13 });
+            texts.Children.Add(new Label { Text = $"{sites.Count} site{(sites.Count == 1 ? "" : "s")}{runMark}", FontSize = 11, TextColor = dim });
+            var chev = new Label { Text = open ? "\u2304" : "\u203a", FontSize = 16, TextColor = dim, VerticalOptions = LayoutOptions.Center, Padding = new Thickness(12, 2) };
+            var row = new HorizontalStackLayout { Spacing = 10, Padding = new Thickness(10, 6) };
+            row.Children.Add(texts);
+            row.Children.Add(chev);
+            var aid = a.Id;
+            AddRowTap(row, () => { _openApp = open ? null : aid; RebuildAdsPanel(); });
+            AdsPanelBody.Children.Add(row);
+            if (!open) continue;
+            var box = new VerticalStackLayout { Spacing = 2 };
+            bool anyMine = curKey.Length > 0 && sites.Any(s => s.SiteKey == curKey);
+            if (anyMine) box.Children.Add(GroupLabel("THIS PROFILE", dim));
+            foreach (var s in sites.Where(s => s.SiteKey == curKey && curKey.Length > 0))
+                box.Children.Add(AppSiteRow(aid, s, dim));
+            if (anyMine && sites.Any(s => s.SiteKey != curKey)) box.Children.Add(GroupLabel("OTHER SITES", dim));
+            foreach (var s in sites.Where(s => s.SiteKey != curKey || curKey.Length == 0))
+                box.Children.Add(AppSiteRow(aid, s, dim));
+            AdsPanelBody.Children.Add(new ScrollView { Content = box, MaximumHeightRequest = 170 });
+        }
+        if (all.Count == 0)
+            AdsPanelBody.Children.Add(new Label { Text = "Nothing picked yet \u2014 Choose\u2026 opens the app picker.", FontSize = 12, TextColor = dim, Padding = new Thickness(10, 2, 10, 4) });
+        var choose = new Button
+        {
+            Text = "Choose\u2026",
+            FontSize = 13,
+            CornerRadius = 8,
+            Padding = new Thickness(14, 7),
+            BackgroundColor = Colors.Transparent,
+            TextColor = dim,
+            BorderWidth = 1,
+            BorderColor = dim,
+            Margin = new Thickness(10, 6, 10, 0),
+        };
+        choose.Clicked += async (_, _) =>
+        {
+            try
+            {
+                string? h = (_profile != null && _profile.UseLocal) ? "local" : Web.PageHost;
+                string? u = (Web.Source as UrlWebViewSource)?.Url;
+                await PickAppsSheetAsync(h, u);
+            }
+            catch { }
+            RebuildAdsPanel();
+        };
+        AdsPanelBody.Children.Add(choose);
+        var clear = new Button
+        {
+            Text = "Clear this profile\u2019s apps",
+            FontSize = 13,
+            CornerRadius = 8,
+            Padding = new Thickness(14, 7),
+            BackgroundColor = Colors.Transparent,
+            TextColor = dim,
+            BorderWidth = 1,
+            BorderColor = dim,
+            Margin = new Thickness(10, 6, 10, 0),
+        };
+        clear.Clicked += async (_, _) =>
+        {
+            try
+            {
+                string ck = CurrentSiteKey(out string? ch);
+                if (string.IsNullOrEmpty(ck)) return;
+                bool go = await DisplayAlert("Clear picked apps?", "Forget this profile\u2019s picked apps?", "Clear", "Keep");
+                if (go) HdFileGuard.SetAppPicks(ck, new List<HdFileGuard.AppRef>(), ch);
+            }
+            catch { }
+            RebuildAdsPanel();
+        };
+        AdsPanelBody.Children.Add(clear);
+    }
+
+    View AppSiteRow(string appId, HdFileGuard.AppSite s, Color dim)
+    {
+        var texts = new VerticalStackLayout { Spacing = 0, VerticalOptions = LayoutOptions.Center, HorizontalOptions = LayoutOptions.StartAndExpand };
+        texts.Children.Add(new Label { Text = s.Display, TextColor = Colors.White, FontSize = 13 });
+        texts.Children.Add(new Label { Text = s.Enabled ? "Allowed" : "Off", FontSize = 11, TextColor = s.Enabled ? dim : Color.FromArgb("#E14B32") });
+        var cb = new HdCheckBox { IsChecked = s.Enabled, VerticalOptions = LayoutOptions.Center };
+        cb.CheckedChanged += (_, on) => { HdFileGuard.SetAppOff(s.SiteKey, null, appId, !on, true); RebuildAdsPanel(); };
+        texts.GestureRecognizers.Add(new TapGestureRecognizer { Command = new Command(() => cb.IsChecked = !cb.IsChecked) });
+        var rm = new Button
+        {
+            Text = "\u2715",
+            FontSize = 12,
+            TextColor = dim,
+            BackgroundColor = Colors.Transparent,
+            BorderWidth = 0,
+            Padding = new Thickness(8, 2),
+            VerticalOptions = LayoutOptions.Center,
+        };
+        rm.Clicked += async (_, _) =>
+        {
+            bool go = await DisplayAlert("Unpick app?", $"Stop letting this site open {s.Display}?", "Remove", "Keep");
+            if (go) { HdFileGuard.RemoveAppPick(s.SiteKey, appId); RebuildAdsPanel(); }
+        };
+        var row = new HorizontalStackLayout { Spacing = 10, Padding = new Thickness(10, 6) };
+        row.Children.Add(texts);
+        row.Children.Add(cb);
+        row.Children.Add(rm);
+        AddHoverBg(row);
+        return row;
     }
 
     View AdsListRow(AdBlockService.ListStatus s, Color dim)

@@ -117,9 +117,36 @@ class HomeDeckJsBridge : Java.Lang.Object
             catch (Exception e) { Resolve(id, "{\"ok\":false,\"error\":" + JsonQuote(e.Message) + "}"); }
         });
 
-    [Android.Webkit.JavascriptInterface, Java.Interop.Export("getBattery")] public string GetBattery() => DeviceBridge.GetBattery();
-    [Android.Webkit.JavascriptInterface, Java.Interop.Export("getNetwork")] public string GetNetwork() => DeviceBridge.GetNetwork();
-    [Android.Webkit.JavascriptInterface, Java.Interop.Export("getDevice")] public string GetDevice() => DeviceBridge.GetDevice();
+    [Android.Webkit.JavascriptInterface, Java.Interop.Export("getBattery")] public void GetBattery(string id, string? host)
+        => Task.Run(async () =>
+        {
+            try
+            {
+                if (!await GuardAsync(host, "read device info")) { Resolve(id, "{\"ok\":false,\"error\":\"denied\"}"); return; }
+                Resolve(id, DeviceBridge.GetBattery());
+            }
+            catch (Exception e) { Resolve(id, "{\"ok\":false,\"error\":" + JsonQuote(e.Message) + "}"); }
+        });
+    [Android.Webkit.JavascriptInterface, Java.Interop.Export("getNetwork")] public void GetNetwork(string id, string? host)
+        => Task.Run(async () =>
+        {
+            try
+            {
+                if (!await GuardAsync(host, "read device info")) { Resolve(id, "{\"ok\":false,\"error\":\"denied\"}"); return; }
+                Resolve(id, DeviceBridge.GetNetwork());
+            }
+            catch (Exception e) { Resolve(id, "{\"ok\":false,\"error\":" + JsonQuote(e.Message) + "}"); }
+        });
+    [Android.Webkit.JavascriptInterface, Java.Interop.Export("getDevice")] public void GetDevice(string id, string? host)
+        => Task.Run(async () =>
+        {
+            try
+            {
+                if (!await GuardAsync(host, "read device info")) { Resolve(id, "{\"ok\":false,\"error\":\"denied\"}"); return; }
+                Resolve(id, DeviceBridge.GetDevice());
+            }
+            catch (Exception e) { Resolve(id, "{\"ok\":false,\"error\":" + JsonQuote(e.Message) + "}"); }
+        });
     [Android.Webkit.JavascriptInterface, Java.Interop.Export("vibrate")] public string Vibrate(int millis) => DeviceBridge.Vibrate(millis);
 
     /// <summary>Element picker reports (fire-and-forget): page JS calls
@@ -158,19 +185,36 @@ class HomeDeckJsBridge : Java.Lang.Object
         => Task.Run(async () => Resolve(id, await DeviceBridge.ShareTextAsync(text, title)));
 
     [Android.Webkit.JavascriptInterface, Java.Interop.Export("clipboardWrite")]
-    public void ClipboardWrite(string id, string? text)
-        => Task.Run(async () => Resolve(id, await DeviceBridge.ClipboardWriteAsync(text)));
-
-    [Android.Webkit.JavascriptInterface, Java.Interop.Export("clipboardRead")]
-    public void ClipboardRead(string id)
-        => Task.Run(async () => Resolve(id, await DeviceBridge.ClipboardReadAsync()));
-
-    [Android.Webkit.JavascriptInterface, Java.Interop.Export("notify")]
-    public void Notify(string id, string? title, string? body)
+    public void ClipboardWrite(string id, string? host, string? text)
         => Task.Run(async () =>
         {
             try
             {
+                if (!await GuardAsync(host, "write the clipboard")) { Resolve(id, "{\"ok\":false,\"error\":\"denied\"}"); return; }
+                Resolve(id, await DeviceBridge.ClipboardWriteAsync(text));
+            }
+            catch (Exception e) { Resolve(id, "{\"ok\":false,\"error\":" + JsonQuote(e.Message) + "}"); }
+        });
+
+    [Android.Webkit.JavascriptInterface, Java.Interop.Export("clipboardRead")]
+    public void ClipboardRead(string id, string? host)
+        => Task.Run(async () =>
+        {
+            try
+            {
+                if (!await GuardAsync(host, "read the clipboard")) { Resolve(id, "{\"ok\":false,\"error\":\"denied\"}"); return; }
+                Resolve(id, await DeviceBridge.ClipboardReadAsync());
+            }
+            catch (Exception e) { Resolve(id, "{\"ok\":false,\"error\":" + JsonQuote(e.Message) + "}"); }
+        });
+
+    [Android.Webkit.JavascriptInterface, Java.Interop.Export("notify")]
+    public void Notify(string id, string? host, string? title, string? body)
+        => Task.Run(async () =>
+        {
+            try
+            {
+                if (!await GuardAsync(host, "send notifications")) { Resolve(id, "{\"ok\":false,\"error\":\"denied\"}"); return; }
                 var center = Plugin.LocalNotification.LocalNotificationCenter.Current;
                 if (!await center.RequestNotificationPermission())
                     Resolve(id, "{\"ok\":false,\"error\":\"denied\"}");
@@ -229,11 +273,12 @@ class HomeDeckJsBridge : Java.Lang.Object
     }
 
     [Android.Webkit.JavascriptInterface, Java.Interop.Export("bleScan")]
-    public void BleScan(string id, int seconds)
+    public void BleScan(string id, string? host, int seconds)
         => Task.Run(async () =>
         {
             try
             {
+                if (!await GuardAsync(host, "scan nearby devices")) { Resolve(id, "{\"ok\":false,\"error\":\"denied\"}"); return; }
                 var st = await Permissions.RequestAsync<BtScanPermission>();
                 if (st != PermissionStatus.Granted) { Resolve(id, "{\"ok\":false,\"error\":\"denied\"}"); return; }
                 var adapter = Android.Bluetooth.BluetoothAdapter.DefaultAdapter;
@@ -318,11 +363,12 @@ class HomeDeckJsBridge : Java.Lang.Object
         });
 
     [Android.Webkit.JavascriptInterface, Java.Interop.Export("getNotifications")]
-    public void GetNotifications(string id)
-        => Task.Run(() =>
+    public void GetNotifications(string id, string? host)
+        => Task.Run(async () =>
         {
             try
             {
+                if (!await GuardAsync(host, "read notifications")) { Resolve(id, "{\"ok\":false,\"error\":\"denied\"}"); return; }
                 var activity = Platform.CurrentActivity;
                 if (activity != null && !HdNotificationService.IsEnabled(activity))
                 {

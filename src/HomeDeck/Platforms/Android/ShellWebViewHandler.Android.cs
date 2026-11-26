@@ -23,6 +23,14 @@ public partial class ShellWebViewHandler
     /// including the late one. Wired by the page to refresh open UI.</summary>
     public Action? CountsChanged;
 
+    /// <summary>How this page is currently served (Advanced settings →
+    /// Bridge status). Never throws.</summary>
+    public string BridgeStatus()
+    {
+        try { return _wv == null ? "no view" : "JS interface"; }
+        catch { return "unknown"; }
+    }
+
     protected override void ConnectHandler(Android.Webkit.WebView platformView)
     {
         base.ConnectHandler(platformView);

@@ -44,6 +44,14 @@ public partial class ShellWebViewHandler
     /// including the late one. Wired by the page to refresh open UI.</summary>
     public Action? CountsChanged;
 
+    /// <summary>How this page is currently served (Advanced settings →
+    /// Bridge status). Never throws.</summary>
+    public string BridgeStatus()
+    {
+        try { return _hostRegistered ? "host object" : "poll transport"; }
+        catch { return "unknown"; }
+    }
+
     protected override void ConnectHandler(Microsoft.UI.Xaml.Controls.WebView2 platformView)
     {
         base.ConnectHandler(platformView);

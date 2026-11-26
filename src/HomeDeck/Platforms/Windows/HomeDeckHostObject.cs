@@ -94,16 +94,46 @@ public class HomeDeckHostObject
         try { _onCancel(); } catch { }
     }
 
-    public string getBattery() => DeviceBridge.GetBattery();
-    public string getNetwork() => DeviceBridge.GetNetwork();
-    public string getDevice() => DeviceBridge.GetDevice();
-    public string vibrate(int millis) => DeviceBridge.Vibrate(millis);
-
-    public void bleScan(string id, int seconds)
+    public void getBattery(string id, string? host)
         => Task.Run(async () =>
         {
             try
             {
+                if (!await Guard(host, "read device info")) { _post(JsonPair(id, "{\"ok\":false,\"error\":\"denied\"}")); return; }
+                _post(JsonPair(id, DeviceBridge.GetBattery()));
+            }
+            catch (Exception e) { _post(JsonPair(id, "{\"ok\":false,\"error\":" + Q(e.Message) + "}")); }
+        });
+
+    public void getNetwork(string id, string? host)
+        => Task.Run(async () =>
+        {
+            try
+            {
+                if (!await Guard(host, "read device info")) { _post(JsonPair(id, "{\"ok\":false,\"error\":\"denied\"}")); return; }
+                _post(JsonPair(id, DeviceBridge.GetNetwork()));
+            }
+            catch (Exception e) { _post(JsonPair(id, "{\"ok\":false,\"error\":" + Q(e.Message) + "}")); }
+        });
+
+    public void getDevice(string id, string? host)
+        => Task.Run(async () =>
+        {
+            try
+            {
+                if (!await Guard(host, "read device info")) { _post(JsonPair(id, "{\"ok\":false,\"error\":\"denied\"}")); return; }
+                _post(JsonPair(id, DeviceBridge.GetDevice()));
+            }
+            catch (Exception e) { _post(JsonPair(id, "{\"ok\":false,\"error\":" + Q(e.Message) + "}")); }
+        });
+    public string vibrate(int millis) => DeviceBridge.Vibrate(millis);
+
+    public void bleScan(string id, string? host, int seconds)
+        => Task.Run(async () =>
+        {
+            try
+            {
+                if (!await Guard(host, "scan nearby devices")) { _post(JsonPair(id, "{\"ok\":false,\"error\":\"denied\"}")); return; }
                 var seen = new System.Collections.Concurrent.ConcurrentDictionary<ulong, (string name, int rssi)>();
                 var watcher = new Windows.Devices.Bluetooth.Advertisement.BluetoothLEAdvertisementWatcher
                 {
@@ -134,11 +164,12 @@ public class HomeDeckHostObject
     /// <summary>Read access to toasts via UserNotificationListener. First
     /// call prompts the user (RequestAccessAsync, UI thread); the grant
     /// lives in Settings → Privacy → Notifications.</summary>
-    public void getNotifications(string id)
+    public void getNotifications(string id, string? host)
         => Task.Run(async () =>
         {
             try
             {
+                if (!await Guard(host, "read notifications")) { _post(JsonPair(id, "{\"ok\":false,\"error\":\"denied\"}")); return; }
                 var status = await Microsoft.Maui.ApplicationModel.MainThread.InvokeOnMainThreadAsync(
                     () => Windows.UI.Notifications.Management.UserNotificationListener.Current.RequestAccessAsync().AsTask());
                 if (status != Windows.UI.Notifications.Management.UserNotificationListenerAccessStatus.Allowed)
@@ -412,17 +443,34 @@ public class HomeDeckHostObject
     public void shareText(string id, string? text, string? title)
         => Task.Run(async () => _post(JsonPair(id, await DeviceBridge.ShareTextAsync(text, title))));
 
-    public void clipboardWrite(string id, string? text)
-        => Task.Run(async () => _post(JsonPair(id, await DeviceBridge.ClipboardWriteAsync(text))));
-
-    public void clipboardRead(string id)
-        => Task.Run(async () => _post(JsonPair(id, await DeviceBridge.ClipboardReadAsync())));
-
-    public void notify(string id, string? title, string? body)
+    public void clipboardWrite(string id, string? host, string? text)
         => Task.Run(async () =>
         {
             try
             {
+                if (!await Guard(host, "write the clipboard")) { _post(JsonPair(id, "{\"ok\":false,\"error\":\"denied\"}")); return; }
+                _post(JsonPair(id, await DeviceBridge.ClipboardWriteAsync(text)));
+            }
+            catch (Exception e) { _post(JsonPair(id, "{\"ok\":false,\"error\":" + Q(e.Message) + "}")); }
+        });
+
+    public void clipboardRead(string id, string? host)
+        => Task.Run(async () =>
+        {
+            try
+            {
+                if (!await Guard(host, "read the clipboard")) { _post(JsonPair(id, "{\"ok\":false,\"error\":\"denied\"}")); return; }
+                _post(JsonPair(id, await DeviceBridge.ClipboardReadAsync()));
+            }
+            catch (Exception e) { _post(JsonPair(id, "{\"ok\":false,\"error\":" + Q(e.Message) + "}")); }
+        });
+
+    public void notify(string id, string? host, string? title, string? body)
+        => Task.Run(async () =>
+        {
+            try
+            {
+                if (!await Guard(host, "send notifications")) { _post(JsonPair(id, "{\"ok\":false,\"error\":\"denied\"}")); return; }
                 var center = Plugin.LocalNotification.LocalNotificationCenter.Current;
                 if (!await center.RequestNotificationPermission())
                     _post(JsonPair(id, "{\"ok\":false,\"error\":\"denied\"}"));

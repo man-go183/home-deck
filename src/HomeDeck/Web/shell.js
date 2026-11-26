@@ -108,12 +108,12 @@
 
   window.HomeDeck = {
     version: "hd/1",
-    getBattery: () => callSync("getBattery"),
-    getNetwork: () => callSync("getNetwork"),
-    getDevice: () => callSync("getDevice"),
+    getBattery: () => callAsync("getBattery", pgHost()),
+    getNetwork: () => callAsync("getNetwork", pgHost()),
+    getDevice: () => callAsync("getDevice", pgHost()),
     vibrate: (ms) => callSync("vibrate", ms | 0),
-    bleScan: (seconds) => callAsync("bleScan", Math.max(1, Math.min(30, seconds | 0 || 8))),
-    getNotifications: () => callAsync("getNotifications"),
+    bleScan: (seconds) => callAsync("bleScan", pgHost(), Math.max(1, Math.min(30, seconds | 0 || 8))),
+    getNotifications: () => callAsync("getNotifications", pgHost()),
     notificationAccess: () => callSync("notificationAccess"),
     openNotificationSettings: () => callAsync("openNotificationSettings"),
     getBrightness: () => callSync("getBrightness"),
@@ -133,9 +133,9 @@
     wifiScan: () => callAsync("wifiScan"),
     bluetoothDevices: (inquiry) => callAsync("bluetoothDevices", inquiry ? 1 : 0),
     shareText: (text, title) => callAsync("shareText", text || "", title || ""),
-    clipboardWrite: (text) => callAsync("clipboardWrite", text || ""),
-    clipboardRead: () => callAsync("clipboardRead"),
-    notify: (title, body) => callAsync("notify", title || "", body || "")
+    clipboardWrite: (text) => callAsync("clipboardWrite", pgHost(), text || ""),
+    clipboardRead: () => callAsync("clipboardRead", pgHost()),
+    notify: (title, body) => callAsync("notify", pgHost(), title || "", body || "")
   };
 
   window.dispatchEvent(new Event("homedeck:ready"));
